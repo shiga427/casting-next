@@ -1,0 +1,30 @@
+{
+  "_": "ステムボーテ プリセット v2.6(設計書§10)。現行値の正。新プロジェクトはこれを複製して編集する。",
+  "id": "stembeaute_v26",
+  "name": "ステムボーテ",
+  "brandName": "Stem beauté",
+  "note": "美容系プロジェクト向け。qualsignals の辞書は日本語の美容・生活文脈に最適化されている(§10 注)",
+  "band": {
+    "micro": { "followers_min": 5000, "followers_max": 30000 },
+    "middle": { "followers_min": 30000, "followers_max": 100000 },
+    "megaFrom": 100000
+  },
+  "filters": {
+    "micro": { "engagement_rate_min": 2.0, "avg_comments_min": 3, "comment_rate_min": 0.10 },
+    "middle": { "engagement_rate_min": 1.5, "avg_comments_min": 5, "comment_rate_min": 0.05 },
+    "purity": { "following_max": 3000, "ff_ratio_min": 2.0 },
+    "common": {
+      "genre_exclude": ["reseller", "bot", "adult", "gambling", "finance"],
+      "language": ["ja"], "exclude_private": true, "unknown_policy": "exclude"
+    }
+  },
+  "search": {
+    "e1_tags": ["#購入品紹介", "#スキンケア購入品", "#コスメレポ", "#使い切りコスメ", "#当選報告", "#当選しました",
+      "#モニター当選", "#スキンケア記録", "#美容記録", "#美容垢さんと繋がりたい", "#コスメ好きさんと繋がりたい"],
+    "e1_life_tags": ["アラサー美容", "アラフォー美容", "ママ美容", "ずぼらスキンケア", "夜のスキンケア", "自分磨き記録"],
+    "e2_keywords": ["購入品紹介", "コスメレポ", "当選報告", "スキンケア記録", "スキンケア購入品", "モニター当選",
+      "使い切りコスメ", "ナイアシンアミド", "レチノール", "ご褒美コスメ", "30代コスメ", "スキンケア紹介"]
+  },
+  "slots": { "連載枠": 4, "都度枠": 10 },
+  "text": { "characterAlerts": false }
+}

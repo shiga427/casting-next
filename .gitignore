@@ -1,0 +1,43 @@
+# ============================================================
+# 公開リポジトリ。実在アカウントのデータを1バイトも入れない。
+# 設計書§11-2:置いてよいのはコード・キット・匿名化fixture・ドキュメントだけ。
+# ============================================================
+
+# 移植元キット本体(このリポジトリの親に置かれる)。誤って中に持ち込んでも弾く
+reference/
+**/reference/
+成果物_*/
+**/成果物_*/
+job_in/
+job_in_done.csv
+
+# 取得データ・運用データの形をした一切のもの
+*.jsonl
+*_run[0-9]*.csv
+*_run[0-9]*.json
+*_run[0-9]*.md
+matched*.csv
+rejected*.csv
+all_run*.csv
+summary_*.json
+biz疑い*.csv
+postscreen_review*.csv
+精査_*.txt
+定性_*.txt
+定性評価_*.md
+精査記録_*.md
+カバレッジ表_*.md
+候補リスト_*.md
+stembeaute_casting_*.json
+
+# ただし匿名化済みfixtureは明示的に許可(tools/ が生成したものだけ)
+!tests/fixtures/*.jsonl
+!tests/fixtures/*.json
+!tests/fixtures/*.csv
+
+# OS / エディタ
+.DS_Store
+node_modules/
+*.log
+.vscode/
+.idea/

@@ -1,0 +1,99 @@
+{
+ "app": "stembeaute-casting",
+ "v": 3,
+ "savedAt": "2026-07-01T00:00:00.000Z",
+ "conf": {
+  "ver": "SBIS v1.1",
+  "microMin": 5000,
+  "microMax": 30000,
+  "midMin": 30000,
+  "midMax": 100000,
+  "convFloor": 0.005,
+  "convFull": 0.03,
+  "erMid0": 2,
+  "erMidFull": 5,
+  "erMic0": 3.5,
+  "erMicFull": 8,
+  "cutoffConv": 5,
+  "kwIngredient": "成分,ナイアシンアミド,レチノール,ヒト幹細胞,幹細胞培養液,ビタミンC,セラミド,ペプチド",
+  "kwReview": "購入品,レポ,正直,レビュー,使い切り,スウォッチ,比較",
+  "kwAge": "20代,30代,40代,50代,アラサー,アラフォー",
+  "kwWin": "当選,モニター,懸賞",
+  "kwPenaltyPr": "案件募集,PRはDM,お仕事依頼,コラボ募集",
+  "kwPenaltyDisc": "クーポン,割引,セール,激安,お得情報",
+  "ngWords": "再生,幹細胞が肌を作り変える,シワが消える,シワ改善,美白効果,若返り,治る,治療,アンチエイジング効果,細胞レベル,ターンオーバー正常化,医薬品級,肌が生まれ変わる",
+  "mannerWords": "いただきものを含みます,いただき物を含みます,個人の感想です,提供いただきました,PR,タイアップ"
+ },
+ "cands": [
+  {
+   "username": "legacy_001",
+   "account_url": "https://www.instagram.com/legacy_001/",
+   "full_name": "サンプル旧1",
+   "followers": 12000,
+   "er": 5,
+   "avg_likes": 500,
+   "avg_comments": 20,
+   "bio": "30代ママの記録。暮らしと美容の話",
+   "status": "精査済",
+   "checksVer": 1,
+   "checks": [
+    true,
+    true,
+    false,
+    true,
+    false,
+    false
+   ],
+   "s2": {
+    "s2yaku": "10",
+    "s2pr": "5",
+    "s2cont": "",
+    "s2world": "5",
+    "s2save": ""
+   },
+   "s2ev": {},
+   "s3": {},
+   "aux": {}
+  },
+  {
+   "username": "legacy_002",
+   "account_url": "https://www.instagram.com/legacy_002/",
+   "full_name": "サンプル旧2",
+   "followers": 45000,
+   "er": 1.9,
+   "avg_likes": 800,
+   "avg_comments": 45,
+   "bio": "サロン運営。ご予約はDMから",
+   "status": "候補",
+   "checksVer": 2,
+   "checks": [
+    true,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "s2": {
+    "t1": "10",
+    "t2": "",
+    "t3": "",
+    "t4": "",
+    "t5": ""
+   },
+   "s2ev": {
+    "t1": "根拠メモ"
+   },
+   "s3": {
+    "save": ""
+   },
+   "aux": {}
+  }
+ ],
+ "rejected": [],
+ "confLog": [],
+ "coverage": [],
+ "covMeta": {},
+ "govLog": []
+}
