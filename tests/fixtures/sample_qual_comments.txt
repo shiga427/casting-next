@@ -1,0 +1,73 @@
+# handle=sample_qual  直近12投稿のうちコメント数上位4投稿のコメント欄(GETのみ)
+# API: /api/v1/media/<media_id>/comments/?can_support_threading=true&permalink_enabled=false (最大50件/投稿, min_idでページング)
+# 取得日 2026-07-29 / own_reply=本人(sample_qual)の返信か / level=top(親) child(preview_child_comments)
+# 注: comment_count(API) と取得件数の差は非表示/削除済み、または preview に載らない孫コメントの可能性。
+
+======================================================================
+[POST] code=DbURc9CMOrv date=2026-07-28 media_id=3950859529581816559_68802308873 comment_count(API)=8 取得件数=7
+======================================================================
+--- #1  user=@reader_017  own_reply=no  level=top  likes=2
+最近睫毛が減って来てつけ睫毛を買おうと思っていた所でした。akoko様が購入された品番とか教えていただけたら嬉しいです、宜しくお願いします🙇‍♀️
+--- #2  user=@reader_018  own_reply=YES  level=child  likes=2
+@reader_007 参考にしてもらえて嬉しいな🥰私が付けているのは【02番】です！
+--- #3  user=@reader_019  own_reply=no  level=top  likes=1
+ノーグルーなのいいねー👁️ 100均でもあるみたいやけど中々長かっりするし、これいい！
+--- #4  user=@reader_018  own_reply=YES  level=child  likes=1
+@reader_009 こんなに自然に仕上がるのは初めてだよ！😍👏🔥
+--- #5  user=@reader_020  own_reply=no  level=top  likes=1
+いつも全然うまくいかなくてイライラしてたけど試してみたいかも👀
+接着の強度はどんな感じですか？
+--- #6  user=@reader_018  own_reply=YES  level=child  likes=3
+@reader_010 私もイライラしてた笑
+強度はどうなんだろうなぁ🤫手で取る時はすぐ取れるけど、瞬きしても全然取れない🥰
+--- #7  user=@reader_018  own_reply=YES  level=top  likes=2
+今までのつけまつ毛の概念かわった😮
+
+======================================================================
+[POST] code=DasO54Ms-j2 date=2026-07-12 media_id=3939589324046330102_68802308873 comment_count(API)=7 取得件数=7
+======================================================================
+--- #1  user=@reader_021  own_reply=no  level=top  likes=2
+私４月に30歳の娘、24歳の息子とその彼女と韓国行ってきました‼️ 私の旦那と娘の旦那は猫のお世話でお留守番です🤭😂
+大人になった子供と行く旅行も楽しいものです😍
+いくつになっても楽しみましょね❤️
+--- #2  user=@reader_018  own_reply=YES  level=child  likes=3
+@reader_011 うわ〜😍なんて素敵な旅行話し❤️そんな未来があるんですよね🥹うんうん楽しみましょう🥰💕
+--- #3  user=@reader_022  own_reply=no  level=top  likes=1
+このリールすごく好き🫶２月に台湾旅行計画してるから参考になるーー🥹🇹🇼
+--- #4  user=@reader_018  own_reply=YES  level=child  likes=2
+@reader_012 えー😍めちゃくちゃ嬉しい❤️&2月の台湾いいね🙌あたしも行きたーい😂
+--- #5  user=@reader_023  own_reply=no  level=top  likes=1
+いつ見ても素敵家族だな〜🥹✨韓国行きたい🫶
+--- #6  user=@reader_018  own_reply=YES  level=child  likes=2
+@reader_013 あなたも一緒に連れて行きたいわよ🥹ありがとな❤️‍🔥韓国まじ行きたい🇰🇷🏃‍♀️💕
+--- #7  user=@reader_018  own_reply=YES  level=top  likes=1
+旅行大好き😘みんなが行きたい国はどこー？❤️
+
+======================================================================
+[POST] code=Da0D1vDswtP date=2026-07-15 media_id=3941792460655758159_68802308873 comment_count(API)=5 取得件数=5
+======================================================================
+--- #1  user=@reader_024  own_reply=no  level=top  likes=4
+わたしこのシリーズの、コロコロ挟んでむくみとるやつ(伝われ)持ってます！刺激強めで気持ちいいです🥹🫶🏻
+そして井川遥さま愛用！この頭皮のタイプ絶対買いますー！気持ちよさそう😭❤️‍🔥❤️‍🔥
+--- #2  user=@reader_018  own_reply=YES  level=child  likes=5
+@reader_014 足挟むやつわかるよ!持ってないけど、ずっと横目で見てた😂❤️産後は浮腫むもんね😮ぼちぼちだよぉー🥹🫶🏻💕
+--- #3  user=@reader_025  own_reply=no  level=top  likes=8
+やっぱり頭のマッサージなんですね💆‍♀️🔥👏
+--- #4  user=@reader_018  own_reply=YES  level=child  likes=6
+@reader_015 頭と顔は同じ皮膚〜って言うもんね😮👏❤️
+--- #5  user=@reader_018  own_reply=YES  level=top  likes=5
+まじでぇ🔥気持ち良いからね👍🏻
+
+======================================================================
+[POST] code=DaISjfRMpdN date=2026-06-28 media_id=3929472278474168141_68802308873 comment_count(API)=3 取得件数=2
+======================================================================
+--- #1  user=@reader_018  own_reply=YES  level=top  likes=8
+自分で髪切った事ある？😂
+素直に挙手🙋🏻‍♀️笑
+--- #2  user=@reader_026  own_reply=no  level=top  likes=1
+話が違うんですが、ゴメンなさい
+7月1日に髪をカットしてきたんですが
+ショートボブを希望したんですが😢
+きのこ感？？が強くてイヤでたまらなくて近日中に他の美容室でお直しお願いしようと考えています…😢
+
+[集計] 取得コメント総数=21 本人返信=12 本人返信ユニーク文=12 本人返信ユニーク文比率=12/12=100%

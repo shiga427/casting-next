@@ -200,6 +200,7 @@ export function importCandidateCsv(text, cands, opts) {
   let added = 0, updated = 0, skipped = 0;
   rows.forEach(r => {
     const g = n => r[n] ?? "";
+    if (r._cells < 2) { skipped++; return; }        // v1.4 と同じ不正行スキップ
     const uname = (g("username") || "").trim().replace(/^@/, "");
     if (!uname) { skipped++; return; }
     const rec = {

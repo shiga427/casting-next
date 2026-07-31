@@ -101,6 +101,42 @@ export function sortRows(rows, key = "engagement_rate") {
   });
 }
 
+/* DMリストCSV(v1.4 の btnExportCsv 相当)。列は v1.4 と同一で、
+   判断19のゲート列・§4-1d のシグナル列・判断25の select_reason / fit_comment / fit_concern を含む。 */
+export const DM_LIST_COLUMNS = ["rank", "username", "tier", "slot", "followers", "following", "ff_ratio",
+  "engagement_rate", "comment_rate", "avg_comments", "sbis1", "sbis1_max", "score_rate", "scoring_mode",
+  "sbis1_raw", "purity_penalty", "purity_gate", "biz_signal", "other_brand_signal", "life_signal",
+  "t1", "t2", "t3", "t4", "t5", "sbis2", "sbis3", "total", "serial_eligible", "pitchman", "status",
+  "dm_sent_at", "remind_at", "checks_done", "account_url", "select_reason", "fit_comment", "fit_concern", "notes"];
+
+/* helpers は sbis.js / conf.js / util.js の関数を渡す(export.js を DOM・状態から独立させるため) */
+export function dmListRows(cands, helpers) {
+  const { TIER_LAB, ffRatio, commentRate, scoreSbis2, scoreSbis3, totalOf, t1Auto, numOrNull, RUBRIC_KEYS, CHECK_ITEMS } = helpers;
+  return cands.map((c, i) => {
+    const sc = c.score || {};
+    const a = t1Auto(numOrNull(c.aux.t1Topic), numOrNull(c.aux.t1Tieup));
+    const row = {
+      rank: i + 1, username: c.username, tier: sc.tier ? TIER_LAB[sc.tier] : "", slot: c.slot || "未定",
+      followers: c.followers ?? "", following: c.following ?? "", ff_ratio: ffRatio(c) ?? "",
+      engagement_rate: c.er ?? "", comment_rate: commentRate(c) ?? "", avg_comments: c.avg_comments ?? "",
+      sbis1: sc.total ?? "", sbis1_max: sc.max ?? "", score_rate: sc.rate ?? "",
+      scoring_mode: sc.mode ? (sc.mode === "rescue" ? "SBIS-1s(救済)" : "SBIS-1") : "",
+      sbis1_raw: sc.raw ?? "", purity_penalty: sc.purity ? (sc.purity.rated ? sc.purity.penalty : "未評価") : "",
+      purity_gate: sc.gated ? "ゲート" : "",
+      biz_signal: c.sig ? c.sig.biz.join("・") : "", other_brand_signal: c.sig ? c.sig.amb.join("・") : "",
+      life_signal: c.sig ? c.sig.life.join("・") : "",
+      sbis2: scoreSbis2(c), sbis3: scoreSbis3(c), total: totalOf(c) ?? "",
+      serial_eligible: (c.growth && c.growth.kind) || "", pitchman: (a && a.pitchman) ? "紹介者" : "",
+      status: c.status, dm_sent_at: c.dmSentAt || "", remind_at: c.remindAt || "",
+      checks_done: c.checks.filter(Boolean).length + "/" + CHECK_ITEMS.length,
+      account_url: c.account_url || "", select_reason: c.selectReason || "", fit_comment: c.fitComment || "",
+      fit_concern: c.fitConcern || "", notes: c.notes || ""
+    };
+    RUBRIC_KEYS.forEach(k => { row[k] = c.s2[k] === "" ? "未確認" : c.s2[k]; });
+    return row;
+  });
+}
+
 /* Excel の文字化けを避けるため BOM 付き。改行は CRLF(Python の csv と同じ) */
 export function rowsToCsv(rows, columns = COLUMNS) {
   const q = s => {

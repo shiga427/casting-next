@@ -72,10 +72,22 @@ try {
   await send("Page.navigate", { url: URL_BASE + "/#/dash" });
   await sleep(1200);
 
-  /* ① プロジェクト作成 → fixture を「ドロップ」相当で流し込む */
-  await evaluate(`(async () => {
+  /* ① 初見者テスト(§9-1・P7):URLを開いただけの状態からウィザードをクリックだけで進む */
+  const wiz1 = await evaluate(`(() => { const b = document.getElementById('wNext1'); if (b) { b.click(); return true; } return false; })()`);
+  await sleep(500);
+  await evaluate(`(() => { const b = document.getElementById('wNext2'); if (b) b.click(); })()`);
+  await sleep(400);
+  const hasSample = await evaluate(`!!document.getElementById('wSample')`);
+  await evaluate(`(() => { const b = document.getElementById('wSample'); if (b) b.click(); })()`);
+  await sleep(1500);
+  const afterWizard = await evaluate(`(async () => {
     const store = await import('/js/store.js');
-    if (!store.state.project) await store.createProject({ id:'p1', name:'ステムボーテ', brandName:'Stem beauté', preset:'stembeaute_v26' });
+    return { hash: location.hash, cands: store.state.cands.length };
+  })()`);
+  console.log(`ウィザード:①作成=${wiz1} ③サンプル=${hasSample} → ${afterWizard.hash}(候補 ${afterWizard.cands}件)`);
+
+  /* ② 本番相当:run#6 の匿名化fixture を「ドロップ」相当で流し込む */
+  await evaluate(`(async () => {
     const text = await (await fetch('/tests/fixtures/run6_compact.jsonl')).text();
     const collect = await import('/js/views/collect.js');
     collect.handleFile(text, 'run6_compact.jsonl');
@@ -116,13 +128,29 @@ try {
   console.log(`遷移先: ${check.hash}`);
 
   /* ③ スクリーンショット */
-  for (const [hash, file] of [["#/analysis", "/tmp/castnext_analysis.png"], ["#/dash", "/tmp/castnext_dash.png"], ["#/board", "/tmp/castnext_board.png"]]) {
+  for (const [hash, file] of [["#/analysis", "/tmp/castnext_analysis.png"], ["#/dash", "/tmp/castnext_dash.png"],
+  ["#/board", "/tmp/castnext_board.png"], ["#/kanban", "/tmp/castnext_kanban.png"],
+  ["#/collect", "/tmp/castnext_collect.png"], ["#/settings", "/tmp/castnext_settings.png"]]) {
     await evaluate(`location.hash = '${hash}'`);
     await sleep(700);
     const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
     writeFileSync(file, Buffer.from(shot.data, "base64"));
     console.log("スクリーンショット:", file);
   }
+  /* 候補詳細(モーダル)も1枚 */
+  await evaluate(`(async () => {
+    const store = await import('/js/store.js');
+    const detail = await import('/js/views/detail.js');
+    location.hash = '#/board';
+    await new Promise(r => setTimeout(r, 400));
+    const top = store.state.cands.filter(c => c.score && !c.score.cut).sort((a,b) => b.score.rate - a.score.rate)[0];
+    if (top) detail.open(top.username);
+    return top ? top.username : null;
+  })()`);
+  await sleep(800);
+  const shot2 = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+  writeFileSync("/tmp/castnext_detail.png", Buffer.from(shot2.data, "base64"));
+  console.log("スクリーンショット: /tmp/castnext_detail.png");
   if (errors.length) { console.log("⚠ ページ例外:", errors.slice(0, 5)); ng++; }
   console.log(ng ? `\n==== ${ng}件NG ====` : "\n==== ALL PASS ====");
   process.exitCode = ng ? 1 : 0;

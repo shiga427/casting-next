@@ -6,6 +6,24 @@ import { esc } from "../charts.js";
 import { totalOf, scoreSbis2, scoreSbis3, ffRatio, t1Auto } from "../pipeline/sbis.js";
 import { TIER_LAB } from "../pipeline/conf.js";
 import { numOrNull } from "../pipeline/util.js";
+import { open as openDetail } from "./detail.js";
+import { RUBRIC_KEYS, CHECK_ITEMS } from "../pipeline/conf.js";
+import { DM_LIST_COLUMNS, dmListRows, rowsToCsv } from "../pipeline/export.js";
+
+export function mount() {
+  document.querySelectorAll("#view tr.click").forEach(tr => tr.onclick = () => openDetail(tr.dataset.u));
+  const btn = document.getElementById("btnDmCsv");
+  if (btn) btn.onclick = () => {
+    const showCut = location.hash.includes("cut=1");
+    const list = state.cands.filter(c => showCut || !(c.score && c.score.cut))
+      .sort((a, b) => (b.score && b.score.rate != null ? b.score.rate : -1) - (a.score && a.score.rate != null ? a.score.rate : -1));
+    const rows = dmListRows(list, { TIER_LAB, ffRatio, commentRate, scoreSbis2, scoreSbis3, totalOf, t1Auto, numOrNull, RUBRIC_KEYS, CHECK_ITEMS });
+    const blob = new Blob(["﻿" + rowsToCsv(rows, DM_LIST_COLUMNS)], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "dm_list.csv"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+}
 
 export function render() {
   const showCut = location.hash.includes("cut=1");
@@ -18,6 +36,7 @@ export function render() {
     <div class="runsel">
       <a class="chip ${showCut ? "" : "on"}" href="#/board">有効候補のみ</a>
       <a class="chip ${showCut ? "on" : ""}" href="#/board?cut=1">足切り・純度ゲートも表示</a>
+      <button class="btn ghost sm" id="btnDmCsv">DMリストCSVを書き出す</button>
     </div>
   </div>
   <div class="card" style="padding:0">
@@ -29,7 +48,7 @@ export function render() {
       <tbody>${list.map((c, i) => {
         const sc = c.score || {};
         const a = t1Auto(numOrNull(c.aux.t1Topic), numOrNull(c.aux.t1Tieup));
-        return `<tr>
+        return `<tr class="click" data-u="${esc(c.username)}">
           <td class="num">${i + 1}</td>
           <td><a class="handle" href="${esc(c.account_url || "#")}" target="_blank" rel="noopener">@${esc(c.username)}</a>
             ${sc.mode === "rescue" ? `<span class="tag res">救済 /75</span>` : ""}
@@ -53,9 +72,7 @@ export function render() {
     </table></div>
     ${list.length ? "" : `<div class="empty">まだ候補がありません。「収集」から取得結果をドロップしてください。</div>`}
   </div>
-  <div class="card"><h3>P3 で足すもの</h3>
-    <p class="hint">候補詳細(左=プロフィールとSBIS-1内訳/中=証言力rubric T1〜T5(証拠メモ必須・T3のNG突合とロック)/
-    右=適合コメント・契約枠・ステータス)、フィルタ、一括操作、DM下書き。ロジックは移植済みです。</p></div>`;
+  <div class="note">行をクリックすると候補詳細(SBIS-1内訳・証言力rubric・適合コメント)が開きます。</div>`;
 }
 
 function fmt(n) { return n == null ? "不明" : Number(n).toLocaleString("ja-JP"); }

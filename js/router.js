@@ -13,6 +13,8 @@ export const ROUTES = [
   { group: "運用", path: "io", label: "データ入出力", view: "io" },
   { group: "運用", path: "settings", label: "設定・基準", view: "settings" },
   { group: "運用", path: "oplog", label: "運用ログ", view: "oplog" },
+  /* group が空のものはナビに出さない(初回ウィザード用の隠しルート) */
+  { group: "", path: "setup", label: "はじめの設定", view: "onboarding" },
 ];
 
 export function currentRoute() {
@@ -25,7 +27,14 @@ export function currentRoute() {
 
 export function go(path, params) {
   const q = params ? "?" + new URLSearchParams(params).toString() : "";
-  location.hash = "#/" + path + q;
+  const next = "#/" + path + q;
+  if (location.hash === next) {
+    /* 同じ画面にいるときは hashchange が飛ばないので、明示的に再描画させる
+       (分析結果を開いたまま2つ目のファイルをドロップしても更新されるように) */
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    return;
+  }
+  location.hash = next;
 }
 
 export function onRoute(fn) {

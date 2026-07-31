@@ -1,0 +1,35 @@
+# handle=sample_qual  取得 2026-07-29  API=/api/v1/users/web_profile_info/
+pk=68802308873
+full_name=あここ
+category=(なし)
+followers=14239
+following=267
+posts_total=272
+is_verified=true is_business_account=false is_professional_account=true is_private=false
+
+[external_url]
+https://example.com/x
+
+[bio_links]
+- title=楽天room
+  url=https://example.com/x
+
+[biography 全文]
+˗ˏˋ 41歳 垢抜け美容✨ˎˊ˗
+▫️「なんか老けたかも」を解決する-５歳メイク
+▫️産後ボロボロ肌からツヤ肌になれたスキンケア
+▫️ドラコス、韓国コスメ、時々デパコス💕
+イエベ春/158cm
+\アラフォー歓喜の愛用品はこちら/
+
+[D. 投稿頻度] 取得母数=144件(フィードを12ページ分ページングし taken_at 降順に整列。最古 2025-07-31 / 最新 2026-07-28)
+直近3ヶ月(2026-04-30以降)の投稿本数=31
+週平均=2.45 本/週 (期間12.6週)
+最長投稿間隔=9.0日
+3ヶ月内 最古=2026-04-30 最新=2026-07-28
+アカウント全体 最古取得=2025-07-31 最新=2026-07-28
+ピン留め件数(取得範囲内)=3
+
+# 注: このアカウントもフィードAPIの返却順が taken_at 順ではないため、
+#     12ページ分(ユニーク144件/2025-07-31まで)を取得してから taken_at 降順に整列して直近12件を確定した。
+#     12ページ目でも next_max_id は残っていた(=272投稿すべては未取得)が、直近1年分は網羅済み。

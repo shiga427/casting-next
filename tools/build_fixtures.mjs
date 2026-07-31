@@ -425,6 +425,14 @@ console.log(`シグナル内訳: 生活者 ${sigCount.life}/${wantSig["生活者
 const jsonl = records.map(r => JSON.stringify(toCompact(r))).join("\n") + "\n";
 writeFileSync(join(OUT, "run6_compact.jsonl"), jsonl, "utf8");
 
+/* ---- 出力1b:samples/sample_run.jsonl(オンボーディングの体験用・30件) -- */
+/* 「実データの前に成功体験を作る」(§9-1 の③)。匿名化済みの一部を同梱する。 */
+mkdirSync(join(ROOT, "samples"), { recursive: true });
+const sample = records.filter((_, i) => i % 3 === 0).slice(0, 30);
+writeFileSync(join(ROOT, "samples", "sample_run.jsonl"),
+  sample.map(r => JSON.stringify(toCompact(r))).join("\n") + "\n", "utf8");
+console.log(`サンプル: samples/sample_run.jsonl(${sample.length}件・匿名化済み)`);
+
 /* ---- 出力2:v3_export_sample.json(管制室 v1.4 の書き出し形式) ---------- */
 const v3conf = {
   ver: "SBIS v2.2",
@@ -509,6 +517,43 @@ const legacy = {
   rejected: [], confLog: [], coverage: [], covMeta: {}, govLog: []
 };
 writeFileSync(join(OUT, "legacy_v11_sample.json"), JSON.stringify(legacy, null, 1), "utf8");
+
+/* ---- 出力4:精査データ3ファイル(P6のテスト用・匿名化) --------------- */
+/* qual_report.py と同じ入力形式のまま、ハンドル・表示名・コメント投稿者を差し替える。
+ * 対象は全文キャプションが残っている1名だけ(コメント欄が本体なので comments がある方を選ぶ)。 */
+(() => {
+  const dir = join(REF, "成果物_run6");
+  let files = [];
+  try { files = readdirSync(dir); } catch (e) { return; }
+  const capFiles = files.filter(f => /_captions\.txt$/.test(f));
+  let chosen = null;
+  for (const f of capFiles) {
+    const base = f.replace(/_captions\.txt$/, "");
+    if (files.includes(base + "_comments.txt")) { chosen = base; break; }
+  }
+  if (!chosen) return;
+  const head = readFileSync(join(dir, chosen + "_captions.txt"), "utf8").slice(0, 400);
+  const orig = (head.match(/#\s*handle=([^\s]+)/) || [])[1] || "";
+  const anonHandle = "sample_qual";
+  /* コメント投稿者(user=@xxx)は連番の匿名IDに置き換える */
+  const readerMap = new Map();
+  const anonReader = h => {
+    if (!readerMap.has(h)) readerMap.set(h, "reader_" + String(readerMap.size + 1).padStart(3, "0"));
+    return readerMap.get(h);
+  };
+  const scrub = text => stripLoneSurrogates(String(text)
+    .replace(/user=@([^\s]+)/g, (_, h) => "user=@" + anonReader(h))
+    .replace(/@([A-Za-z0-9._]{2,})/g, (_, h) => "@" + anonReader(h))
+    .replace(/https?:\/\/[^\s]+/g, "https://example.com/x")
+    .replaceAll(orig, anonHandle));
+  ["captions", "comments", "profile"].forEach(kind => {
+    const src = join(dir, `${chosen}_${kind}.txt`);
+    try {
+      writeFileSync(join(OUT, `${anonHandle}_${kind}.txt`), scrub(readFileSync(src, "utf8")), "utf8");
+    } catch (e) { /* profile が無い場合はスキップ */ }
+  });
+  console.log(`精査fixture: ${anonHandle}_{captions,comments,profile}.txt(読者 ${readerMap.size}名を匿名化)`);
+})();
 
 writeFileSync(join(OUT, "run6_stance_notes.json"), JSON.stringify(stanceNotes, null, 1), "utf8");
 console.log("stance補完:", stanceNotes.length + "件", stanceNotes.map(n => n.handle + "(" + n.category + "×" + n.added.length + ")").join(" "));

@@ -80,9 +80,12 @@ export function csvToObjects(text) {
   const out = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (r.length < 2) continue;
     const o = {};
     head.forEach((h, j) => { o[h] = r[j] ?? ""; });
+    /* v1.4 の importCsv は「セルが2つ未満の行」を不正行として飛ばす。
+       1列だけの台帳CSV(job_in_done.csv の username 列)も読めるよう、
+       ここでは飛ばさずセル数だけ渡し、判断は呼び出し側に委ねる。 */
+    Object.defineProperty(o, "_cells", { value: r.length, enumerable: false });
     out.push(o);
   }
   return { head, rows: out };
