@@ -65,13 +65,14 @@ try {
   await send("Runtime.enable");
   await send("Page.navigate", { url: URL_BASE + "/#/board" });
   await sleep(1200);
+  await evaluate(`window.BASE = ${JSON.stringify(URL_BASE)}`);
 
   /* 準備:プロジェクト作成 + v26 fixture の取り込み */
   await evaluate(`(async () => {
-    const store = await import('/js/store.js');
+    const store = await import(BASE + '/js/store.js');
     if (!store.state.project) await store.createProject({ id:'p1', name:'検証', preset:'stembeaute_v26' });
-    const text = await (await fetch('/tests/fixtures/v26_cases.jsonl')).text();
-    const collect = await import('/js/views/collect.js');
+    const text = await (await fetch(BASE + '/tests/fixtures/v26_cases.jsonl')).text();
+    const collect = await import(BASE + '/js/views/collect.js');
     collect.handleFile(text, 'fixture_v26.jsonl');
     location.hash = '#/board';
     return true;
@@ -85,9 +86,9 @@ try {
 
   /* ⑥ 詳細モーダル経由のDM送付日(判断16の回帰) */
   const dm = await evaluate(`(async () => {
-    const detail = await import('/js/views/detail.js');
-    const store = await import('/js/store.js');
-    const util = await import('/js/pipeline/util.js');
+    const detail = await import(BASE + '/js/views/detail.js');
+    const store = await import(BASE + '/js/store.js');
+    const util = await import(BASE + '/js/pipeline/util.js');
     const c = store.state.cands.find(x => x.username === 'sample_life');
     c.fitComment = '① 生活者の証言者候補。② 生活の場面が画面に載る。③ 週次リズムに耐える。④ 懸念:タイアップ比率が未確認。';
     detail.open('sample_life');
@@ -103,8 +104,8 @@ try {
 
   /* ⑥b モーダルを閉じても送付日が消えない */
   const dm2 = await evaluate(`(async () => {
-    const detail = await import('/js/views/detail.js');
-    const store = await import('/js/store.js');
+    const detail = await import(BASE + '/js/views/detail.js');
+    const store = await import(BASE + '/js/store.js');
     document.getElementById('mClose').click();
     const c = store.state.cands.find(x => x.username === 'sample_life');
     return { dmSentAt: c.dmSentAt, open: document.getElementById('ovDetail').classList.contains('open') };
@@ -113,8 +114,8 @@ try {
 
   /* おまけ:適合コメントが空の候補は「DM送付」列にドロップできない(§4-5) */
   const blocked = await evaluate(`(async () => {
-    const store = await import('/js/store.js');
-    const sbis = await import('/js/pipeline/sbis.js');
+    const store = await import(BASE + '/js/store.js');
+    const sbis = await import(BASE + '/js/pipeline/sbis.js');
     const c = store.state.cands.find(x => x.username === 'sample_expert');
     c.fitComment = '';
     const r = sbis.setStatus(c, 'DM送付', '2026-07-30');

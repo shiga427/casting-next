@@ -71,6 +71,7 @@ try {
 
   await send("Page.navigate", { url: URL_BASE + "/#/dash" });
   await sleep(1200);
+  await evaluate(`window.BASE = ${JSON.stringify(URL_BASE)}`);
 
   /* ① 初見者テスト(§9-1・P7):URLを開いただけの状態からウィザードをクリックだけで進む */
   const wiz1 = await evaluate(`(() => { const b = document.getElementById('wNext1'); if (b) { b.click(); return true; } return false; })()`);
@@ -81,15 +82,15 @@ try {
   await evaluate(`(() => { const b = document.getElementById('wSample'); if (b) b.click(); })()`);
   await sleep(1500);
   const afterWizard = await evaluate(`(async () => {
-    const store = await import('/js/store.js');
+    const store = await import(BASE + '/js/store.js');
     return { hash: location.hash, cands: store.state.cands.length };
   })()`);
   console.log(`ウィザード:①作成=${wiz1} ③サンプル=${hasSample} → ${afterWizard.hash}(候補 ${afterWizard.cands}件)`);
 
   /* ② 本番相当:run#6 の匿名化fixture を「ドロップ」相当で流し込む */
   await evaluate(`(async () => {
-    const text = await (await fetch('/tests/fixtures/run6_compact.jsonl')).text();
-    const collect = await import('/js/views/collect.js');
+    const text = await (await fetch(BASE + '/tests/fixtures/run6_compact.jsonl')).text();
+    const collect = await import(BASE + '/js/views/collect.js');
     collect.handleFile(text, 'run6_compact.jsonl');
     return true;
   })()`);
@@ -139,8 +140,8 @@ try {
   }
   /* 候補詳細(モーダル)も1枚 */
   await evaluate(`(async () => {
-    const store = await import('/js/store.js');
-    const detail = await import('/js/views/detail.js');
+    const store = await import(BASE + '/js/store.js');
+    const detail = await import(BASE + '/js/views/detail.js');
     location.hash = '#/board';
     await new Promise(r => setTimeout(r, 400));
     const top = store.state.cands.filter(c => c.score && !c.score.cut).sort((a,b) => b.score.rate - a.score.rate)[0];
