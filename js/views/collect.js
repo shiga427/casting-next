@@ -1,8 +1,12 @@
 /* 収集(キューと依頼文)— 設計書§5-2・§8。AIブラウザ操作の入口。
- * ①キュー生成(rank_queue v2.6 移植・取得済み除外込み)
- * ②依頼文の生成とコピー(手順・禁止事項・ペース・中間チェックを内蔵)
- * ③結果ドロップ(ドロップ即解析 → 分析結果画面へ)
- * ④取得履歴(取得済み台帳はここで管理し、キュー生成時の除外に使う)
+ *
+ * 2モード:
+ *  ①「発掘から始める」 プール不要。プロジェクトの探索タグ(E1)を選んで、
+ *    発掘(タグ検索)→取得(プロフィール)を一体で依頼する。初めての人の既定
+ *  ②「プールから取得」 過去に集めたハンドルのプールから rank_queue v2.6 でキューを作る。2周目以降
+ *
+ * 取得結果をドロップすると、①由来のハンドルは**プール・取得済み台帳・探索カバレッジ表**に
+ * 自動で取り込まれる(js/pipeline/discovery.js)。これで2回目以降は①でも取得済み除外が効く。
  */
 import { state, addRun, markDirty } from "../store.js";
 import { esc } from "../charts.js";
@@ -15,6 +19,7 @@ import { rescoreAll } from "../pipeline/sbis.js";
 import { EXT_COLUMNS, rowsToCsv } from "../pipeline/export.js";
 import { buildQueue, readDoneHandles } from "../pipeline/rankQueue.js";
 import { csvToObjects } from "../pipeline/util.js";
+import { absorbRun, discoveryTags } from "../pipeline/discovery.js";
 
 const PREP = [
   ["chrome", "Chrome を使っている(収集には Chrome 拡張が必要です)"],
@@ -22,51 +27,42 @@ const PREP = [
   ["login", "instagram.com にご自身のアカウントでログインしている"],
 ];
 
+let preset = null;
+async function loadPreset() {
+  if (preset) return preset;
+  try { preset = await fetch("presets/stembeaute_v26.json").then(r => r.json()); }
+  catch (e) { preset = { search: { e1_tags: [], e1_life_tags: [] } }; }
+  return preset;
+}
+/* プリセット読み込み前でも描画できるよう、直近の結果をキャッシュしておく */
+let tagCache = [];
+
+function currentMode() {
+  const m = new URLSearchParams((location.hash.split("?")[1] || "")).get("mode");
+  if (m) return m;
+  /* 既定:プールを持っていない人は「発掘から始める」 */
+  return (state.queue && state.queue.pool && state.queue.pool.length) ? "pool" : "discover";
+}
+
 export function render() {
-  const runs = state.runs;
-  const q = state.queue || {};
-  const done = doneSet();
+  const mode = currentMode();
   return `
   <div class="head"><h1>収集(キューと依頼文)</h1>
-    <span class="meta">取得は利用者ご自身の Claude と Instagram アカウントで行います(設計書§8)。DM送信・フォロー・いいねは一切しません</span></div>
+    <span class="meta">取得は利用者ご自身の Claude と Instagram アカウントで行います(設計書§8)。DM送信・フォロー・いいねは一切しません</span>
+    <div class="runsel">
+      <a class="chip ${mode === "discover" ? "on" : ""}" href="#/collect?mode=discover">① 発掘から始める</a>
+      <a class="chip ${mode === "pool" ? "on" : ""}" href="#/collect?mode=pool">② プールから取得</a>
+    </div>
+  </div>
 
   <div class="cols">
     <div>
-      <div class="card">
-        <h3>① 今回の取得キュー<span class="r">取得済み ${done.size}件を自動で除外します</span></h3>
-        <div class="toolrow">
-          <label class="hint">件数 <input type="number" id="qLimit" value="${q.limit || 100}" min="1" max="500" style="width:80px"></label>
-          <button class="btn" id="btnQueue">キューを作る</button>
-          <button class="btn ghost sm" id="btnPool">プールCSVを読み込む</button>
-          <input type="file" id="filePool" accept=".csv,.txt" style="display:none">
-          <button class="btn ghost sm" id="btnDone">取得済み台帳CSVを読み込む</button>
-          <input type="file" id="fileDone" accept=".csv" style="display:none">
-        </div>
-        <p class="hint">プールCSVは <code>handle,tags,likes</code> の列(探索で集めたハンドル一覧)。
-          並べ替えは rank_queue v2.6(判断24:生活語+2 / レビュアー専業−2 / 法人語−8。除外はせず後回し)。</p>
-        <div class="hint" id="qLog">${q.queue ? `プール ${q.poolSize}件 → 今回のキュー ${q.queue.length}件(生成 ${esc(String(q.at || "").slice(0, 16).replace("T", " "))})` : "プール未読み込み"}</div>
-        ${q.queue && q.queue.length ? `<div class="tblwrap" style="max-height:260px;overflow:auto;margin-top:8px"><table>
-          <thead><tr><th>#</th><th>ハンドル</th><th class="num">score</th><th>tags</th><th>why</th></tr></thead>
-          <tbody>${q.queue.slice(0, 100).map((r, i) => `<tr><td class="num">${i + 1}</td>
-            <td class="handle">@${esc(r.handle)}</td><td class="num">${r.score}</td>
-            <td class="hint">${esc(String(r.tags).slice(0, 24))}</td><td class="hint">${esc(String(r.why).slice(0, 42))}</td></tr>`).join("")}</tbody>
-        </table></div>` : ""}
-      </div>
+      ${mode === "discover" ? discoverCard() : poolCard()}
 
       <div class="card">
-        <h3>② 依頼文<span class="r">これ1つで手順・禁止事項・ペース・中間チェックが全部入ります</span></h3>
-        <div class="toolrow">
-          <button class="btn" id="btnReq" ${q.queue && q.queue.length ? "" : "disabled"}>依頼文を作ってコピー</button>
-          <button class="btn ghost sm" id="btnProbe">プローブ全文をコピー</button>
-          <span class="hint">コピーしたら、ご自身の Claude に貼り付けてください</span>
-        </div>
-        <textarea id="reqText" rows="10" placeholder="「キューを作る」→「依頼文を作ってコピー」の順に押してください"></textarea>
-      </div>
-
-      <div class="card">
-        <h3>③ 取得結果のドロップ<span class="r">.jsonl / 25列CSV</span></h3>
+        <h3>取得結果のドロップ<span class="r">.jsonl / 25列CSV</span></h3>
         <div class="drop" id="drop">
-          ここに <b>${esc((state.queue && state.queue.runTag) || "run")}_compact.jsonl</b> をドラッグ&amp;ドロップ(またはクリックして選択)<br>
+          ここに <b>${esc(nextRunTag())}_compact.jsonl</b> をドラッグ&amp;ドロップ(またはクリックして選択)<br>
           <span class="hint">ドロップした瞬間にブラウザ内で解析します。ファイルはどこにも送信されません。</span>
           <input type="file" id="file" accept=".jsonl,.json,.csv,.txt" multiple style="display:none">
         </div>
@@ -78,33 +74,113 @@ export function render() {
       <div class="card">
         <h3>準備チェック(初回だけ)</h3>
         ${PREP.map(([k, label]) => `<label class="check" style="display:block"><input type="checkbox" class="prep" data-k="${k}"
-          ${(state.queue && state.queue.prep || {})[k] ? "checked" : ""}> ${esc(label)}</label>`).join("")}
+          ${((state.queue && state.queue.prep) || {})[k] ? "checked" : ""}> ${esc(label)}</label>`).join("")}
         <div class="note">拡張が繋がらないときは、拡張のインストール → サイト権限 → IGログイン の3点を順に確認してください(§8-5)。</div>
       </div>
 
-      <div class="card">
-        <h3>④ 取得履歴</h3>
-        ${runs.length ? `<div class="tblwrap"><table>
-          <thead><tr><th>run</th><th class="num">試行</th><th class="num">成功</th><th class="num">合格</th><th class="num">rate</th><th></th></tr></thead>
-          <tbody>${runs.map(r => `<tr>
-            <td><b>${esc(r.runTag)}</b><br><span class="hint">${esc(String(r.ingestedAt).slice(0, 10))}</span></td>
-            <td class="num">${r.attempts}</td><td class="num">${r.succeeded}</td>
-            <td class="num"><b>${r.machinePassed}</b></td><td class="num">${r.rateLimited || 0}</td>
-            <td><button class="btn ghost sm" data-open="${esc(r.runTag)}">分析</button></td>
-          </tr>`).join("")}</tbody></table></div>
-          <div class="note">取得済み台帳:${done.size}件(過去 run の全ハンドル+読み込んだ台帳CSV)。キュー生成時に自動で除外されます。</div>`
-        : `<div class="hint">まだ取得履歴がありません。</div>`}
-      </div>
+      ${historyCard()}
     </div>
   </div>`;
 }
 
-/* 取得済み台帳:過去 run の全ハンドル(username で照合。run#6 不具合1の修正を固定)+ 読み込んだ台帳 */
+/* ---- ① 発掘から始める(プール不要) ------------------------------------ */
+function discoverCard() {
+  const tags = tagCache.length ? tagCache : [];
+  const chosen = (state.queue && state.queue.tags) || null;   // null = 全選択
+  const target = (state.queue && state.queue.target) || 100;
+  const done = doneSet();
+  return `
+  <div class="card">
+    <h3>① 発掘から始める<span class="r">プールがなくても始められます</span></h3>
+    <p class="hint">プロジェクトの探索タグ(E1)から候補を集め、そのままプロフィール取得まで1回の依頼で行います。
+      集まったハンドルは取得後に自動でプールへ入るので、2回目からは②も使えます。</p>
+
+    ${tags.length ? `<div class="tagpick">
+      ${tags.map(t => `<label class="tagbox"><input type="checkbox" class="tagchk" value="${esc(t.tag)}"
+        ${!chosen || chosen.includes(t.tag) ? "checked" : ""}> ${esc(t.tag)}
+        ${t.life ? `<span class="tag g">生活</span>` : ""}</label>`).join("")}
+    </div>
+    <div class="toolrow" style="margin-top:6px">
+      <button class="btn ghost sm" id="btnAll">全選択</button>
+      <button class="btn ghost sm" id="btnLife">生活文脈タグだけ</button>
+      <label class="hint">目標件数 <input type="number" id="dTarget" value="${target}" min="10" max="300" style="width:80px"></label>
+    </div>
+    <div class="toolrow">
+      <button class="btn" id="btnDiscover">発掘依頼文を作ってコピー</button>
+      <button class="btn ghost sm" id="btnProbe">プローブ全文をコピー</button>
+      <span class="hint">取得済み ${done.size}件は依頼文の中で除外されます</span>
+    </div>
+    <textarea id="reqText" rows="10" placeholder="「発掘依頼文を作ってコピー」を押すとここに出ます(コピー済み)"></textarea>
+    <div class="note">生活文脈タグは行動タグの2倍の帯内率・2.5倍の有効率が出ています(run#6実測)。迷ったら生活文脈タグから。</div>`
+    : `<div class="hint">タグを読み込んでいます…</div>`}
+  </div>`;
+}
+
+/* ---- ② プールから取得(現行フロー) ------------------------------------ */
+function poolCard() {
+  const q = state.queue || {};
+  const done = doneSet();
+  const hasPool = !!(q.pool && q.pool.length);
+  return `
+  <div class="card">
+    <h3>② プールから取得<span class="r">取得済み ${done.size}件を自動で除外します</span></h3>
+    ${hasPool ? "" : `<p class="hint">プールは「①発掘から始める」で取得すると自動で貯まります。
+      過去に集めたハンドル一覧(<code>handle,tags,likes</code>)があれば読み込むこともできます。</p>`}
+    <div class="toolrow">
+      <label class="hint">件数 <input type="number" id="qLimit" value="${q.limit || 100}" min="1" max="500" style="width:80px"></label>
+      <button class="btn" id="btnQueue">キューを作る</button>
+      <button class="btn ghost sm" id="btnPool">プールCSVを読み込む</button>
+      <input type="file" id="filePool" accept=".csv,.txt" style="display:none">
+      <button class="btn ghost sm" id="btnDone">取得済み台帳CSVを読み込む</button>
+      <input type="file" id="fileDone" accept=".csv" style="display:none">
+    </div>
+    <div class="hint" id="qLog">${hasPool
+      ? `プール ${q.pool.length}件${q.queue ? ` → 今回のキュー ${q.queue.length}件(生成 ${esc(String(q.at || "").slice(0, 16).replace("T", " "))})` : ""}`
+      : "プールは空です"}</div>
+    ${q.queue && q.queue.length ? `<div class="tblwrap" style="max-height:240px;overflow:auto;margin-top:8px"><table>
+      <thead><tr><th>#</th><th>ハンドル</th><th class="num">score</th><th>tags</th><th>why</th></tr></thead>
+      <tbody>${q.queue.slice(0, 100).map((r, i) => `<tr><td class="num">${i + 1}</td>
+        <td class="handle">@${esc(r.handle)}</td><td class="num">${r.score}</td>
+        <td class="hint">${esc(String(r.tags).slice(0, 24))}</td><td class="hint">${esc(String(r.why).slice(0, 42))}</td></tr>`).join("")}</tbody>
+    </table></div>` : ""}
+    <div class="toolrow" style="margin-top:10px">
+      <button class="btn" id="btnReq" ${q.queue && q.queue.length ? "" : "disabled"}>取得依頼文を作ってコピー</button>
+      <button class="btn ghost sm" id="btnProbe">プローブ全文をコピー</button>
+    </div>
+    <textarea id="reqText" rows="8" placeholder="「キューを作る」→「取得依頼文を作ってコピー」の順に押してください"></textarea>
+  </div>`;
+}
+
+function historyCard() {
+  const runs = state.runs;
+  const done = doneSet();
+  const cov = state.coverage.filter(r => r.st === "完了").length;
+  return `<div class="card">
+    <h3>取得履歴</h3>
+    ${runs.length ? `<div class="tblwrap"><table>
+      <thead><tr><th>run</th><th class="num">試行</th><th class="num">成功</th><th class="num">合格</th><th class="num">rate</th><th></th></tr></thead>
+      <tbody>${runs.map(r => `<tr>
+        <td><b>${esc(r.runTag)}</b><br><span class="hint">${esc(String(r.ingestedAt).slice(0, 10))}</span></td>
+        <td class="num">${r.attempts}</td><td class="num">${r.succeeded}</td>
+        <td class="num"><b>${r.machinePassed}</b></td><td class="num">${r.rateLimited || 0}</td>
+        <td><button class="btn ghost sm" data-open="${esc(r.runTag)}">分析</button></td>
+      </tr>`).join("")}</tbody></table></div>
+      <div class="note">取得済み台帳:${done.size}件(過去 run の全ハンドル+読み込んだ台帳CSV)。
+        探索カバレッジの完了行:${cov}件。どちらも取得結果のドロップで自動更新されます。</div>`
+    : `<div class="hint">まだ取得履歴がありません。</div>`}
+  </div>`;
+}
+
+/* 取得済み台帳:過去 run の全ハンドル(username で照合)+ 読み込んだ台帳 */
 function doneSet() {
   const s = new Set();
   state.runs.forEach(r => (r.rows || []).forEach(row => s.add(String(row.username).toLowerCase())));
   ((state.queue && state.queue.doneExtra) || []).forEach(h => s.add(String(h).toLowerCase()));
   return s;
+}
+function nextRunTag() {
+  if (state.queue && state.queue.runTag && !state.runs.some(r => r.runTag === state.queue.runTag)) return state.queue.runTag;
+  return "run" + (state.runs.length + 1);
 }
 
 export function mount() {
@@ -121,14 +197,83 @@ export function mount() {
     state.queue.prep = { ...(state.queue.prep || {}), [cb.dataset.k]: cb.checked };
     markDirty();
   });
+  const probe = $("btnProbe");
+  if (probe) probe.onclick = copyProbe;
 
+  if (currentMode() === "discover") mountDiscover();
+  else mountPool();
+}
+
+/* ---- ① 発掘モード ------------------------------------------------------ */
+async function mountDiscover() {
+  const $ = id => document.getElementById(id);
+  if (!tagCache.length) {
+    tagCache = discoveryTags(await loadPreset());
+    if (tagCache.length) { window.dispatchEvent(new HashChangeEvent("hashchange")); return; }
+  }
+  const chosen = () => [...document.querySelectorAll(".tagchk:checked")].map(c => c.value);
+  document.querySelectorAll(".tagchk").forEach(c => c.onchange = () => {
+    state.queue = { ...(state.queue || {}), tags: chosen() };
+    markDirty();
+  });
+  if ($("btnAll")) $("btnAll").onclick = () => {
+    document.querySelectorAll(".tagchk").forEach(c => { c.checked = true; });
+    state.queue = { ...(state.queue || {}), tags: chosen() }; markDirty();
+  };
+  if ($("btnLife")) $("btnLife").onclick = () => {
+    const life = tagCache.filter(t => t.life).map(t => t.tag);
+    document.querySelectorAll(".tagchk").forEach(c => { c.checked = life.includes(c.value); });
+    state.queue = { ...(state.queue || {}), tags: chosen() }; markDirty();
+  };
+  if ($("dTarget")) $("dTarget").onchange = () => {
+    state.queue = { ...(state.queue || {}), target: Number($("dTarget").value) || 100 };
+    markDirty();
+  };
+  if ($("btnDiscover")) $("btnDiscover").onclick = () => makeDiscoveryRequest(chosen());
+}
+
+async function makeDiscoveryRequest(tags) {
+  if (!tags.length) { toast("タグを1つ以上選んでください", true); return; }
+  const target = Number(document.getElementById("dTarget").value) || 100;
+  const runTag = nextRunTag();
+  const [tpl, ver] = await Promise.all([
+    fetch("kit/discovery_template.md").then(r => r.text()),
+    fetch("kit/version.json").then(r => r.json()).catch(() => ({ kit: "?" }))
+  ]);
+  const lifeSet = new Set(tagCache.filter(t => t.life).map(t => t.tag));
+  const tagList = tags.map((t, i) => `${i + 1}. ${t}${lifeSet.has(t) ? "(生活)" : ""}`).join("\n");
+  const done = [...doneSet()].sort();
+  const doneText = done.length
+    ? (done.length > 400
+      ? done.slice(0, 400).map(h => "@" + h).join(" ") + `\n…ほか ${done.length - 400}件(全件は管制室の「データ入出力」から書き出せます)`
+      : done.map(h => "@" + h).join(" "))
+    : "(まだ1件も取得していません。今回は全部が新規です)";
+  const base = location.origin + location.pathname.replace(/[^/]*$/, "") + "kit";
+  const text = tpl
+    .replaceAll("{RUN_TAG}", runTag)
+    .replaceAll("{TARGET}", String(target))
+    .replaceAll("{TAGS}", tagList)
+    .replaceAll("{DONE_HANDLES}", doneText)
+    .replaceAll("{KIT_URL}", base)
+    .replaceAll("{BAND_MIN}", (state.conf.microMin || 5000).toLocaleString("ja-JP"))
+    .replaceAll("{BAND_MAX}", (state.conf.midMax || 100000).toLocaleString("ja-JP"))
+    .replaceAll("{BRAND}", (state.project && state.project.name) || "")
+    .replaceAll("{KIT_VERSION}", ver.kit || "?");
+  document.getElementById("reqText").value = text;
+  state.queue = { ...(state.queue || {}), mode: "discover", tags, target, runTag, at: new Date().toISOString() };
+  markDirty();
+  copy(text, "発掘依頼文をコピーしました。ご自身の Claude に貼り付けてください");
+}
+
+/* ---- ② プールモード ---------------------------------------------------- */
+function mountPool() {
+  const $ = id => document.getElementById(id);
   $("btnPool").onclick = () => $("filePool").click();
   $("filePool").onchange = e => { readOne(e.target.files[0], loadPool); e.target.value = ""; };
   $("btnDone").onclick = () => $("fileDone").click();
   $("fileDone").onchange = e => { readOne(e.target.files[0], loadDone); e.target.value = ""; };
   $("btnQueue").onclick = makeQueue;
   $("btnReq").onclick = makeRequest;
-  $("btnProbe").onclick = copyProbe;
 }
 
 function readFiles(files) { [...files].forEach(f => readOne(f, handleFile)); }
@@ -140,7 +285,6 @@ function readOne(f, fn) {
 }
 function log(html) { const el = document.getElementById("qLog"); if (el) el.innerHTML = html; }
 
-/* --- ①キュー ---------------------------------------------------------- */
 function loadPool(text, name) {
   const { rows } = csvToObjects(text);
   const pool = rows.map(r => ({ handle: r.handle || r.username || "", tags: r.tags || "", likes: r.likes || "" }))
@@ -157,17 +301,18 @@ function loadDone(text, name) {
 }
 function makeQueue() {
   const q = state.queue || {};
-  if (!q.pool || !q.pool.length) { toast("先にプールCSVを読み込んでください", true); return; }
+  if (!q.pool || !q.pool.length) {
+    toast("プールが空です。①発掘から始めるか、プールCSVを読み込んでください", true);
+    return;
+  }
   const limit = Number(document.getElementById("qLimit").value) || 100;
   const res = buildQueue(q.pool, doneSet(), limit);
-  const n = state.runs.length + 1;
-  state.queue = { ...q, ...res, limit, runTag: "run" + n, at: new Date().toISOString() };
+  state.queue = { ...q, ...res, limit, mode: "pool", runTag: nextRunTag(), at: new Date().toISOString() };
   markDirty();
   toast(`キューを作りました(${res.queue.length}件 / プール残 ${res.poolSize}件)`);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
-/* --- ②依頼文 ---------------------------------------------------------- */
 async function makeRequest() {
   const q = state.queue;
   if (!q || !q.queue || !q.queue.length) { toast("先にキューを作ってください", true); return; }
@@ -187,8 +332,9 @@ async function makeRequest() {
     .replaceAll("{BRAND}", (state.project && state.project.name) || "")
     .replaceAll("{KIT_VERSION}", ver.kit || "?");
   document.getElementById("reqText").value = text;
-  copy(text, "依頼文をコピーしました。ご自身の Claude に貼り付けてください");
+  copy(text, "取得依頼文をコピーしました。ご自身の Claude に貼り付けてください");
 }
+
 async function copyProbe() {
   const [probe, prof] = await Promise.all([
     fetch("kit/ig_probe.js").then(r => r.text()),
@@ -198,11 +344,25 @@ async function copyProbe() {
     "プローブ全文をコピーしました(fetch できない環境用の代替経路です)");
 }
 function copy(text, msg) {
-  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast(msg), () => toast("コピーできませんでした。テキスト欄から手動でコピーしてください", true));
-  else toast("このブラウザではコピーできません。テキスト欄から手動でコピーしてください", true);
+  /* Clipboard API が使えない環境(権限なし・http 等)では、テキスト欄を選択して
+     execCommand にフォールバックする。それも駄目なら手動コピーを案内する。 */
+  const fallback = () => {
+    const ta = document.getElementById("reqText");
+    if (ta) {
+      ta.value = text;
+      ta.focus(); ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      if (ok) { toast(msg); return; }
+    }
+    toast("自動コピーができませんでした。下のテキスト欄を選択してコピーしてください", true);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast(msg), fallback);
+  } else fallback();
 }
 
-/* --- ③ドロップ -------------------------------------------------------- */
+/* ---- ドロップ(共通) --------------------------------------------------- */
 export function handleFile(text, name) {
   if (/\.csv$/i.test(name)) return handleCsv(text, name);
   return handleJsonl(text, name);
@@ -217,8 +377,7 @@ function handleCsv(text, name) {
 function guessTag(name) {
   const m = String(name).match(/run\s*_?(\d+)/i);
   if (m) return "run" + m[1];
-  if (state.queue && state.queue.runTag && !state.runs.some(r => r.runTag === state.queue.runTag)) return state.queue.runTag;
-  return "run" + (state.runs.length + 1);
+  return nextRunTag();
 }
 function handleJsonl(text, name) {
   const runTag = guessTag(name);
@@ -238,12 +397,25 @@ function handleJsonl(text, name) {
   const { raws } = parseJsonl(text);
   run.bizQuarantined = postscreen(raws).rows;
   addRun(run);
+
+  /* 発掘由来のハンドルをプール・取得済み台帳・探索カバレッジ表に取り込む(2周目以降のため) */
+  const absorbed = absorbRun(run, {
+    pool: (state.queue && state.queue.pool) || [],
+    coverage: state.coverage,
+    done: [...doneSet()]
+  });
+  state.queue = { ...(state.queue || {}), pool: absorbed.pool, doneExtra: absorbed.done };
+  state.coverage = absorbed.coverage;
+
   const csv = rowsToCsv(run.rows.filter(r => r.verdict === "passed").map(rowFromRun), EXT_COLUMNS);
   const res = importCandidateCsv(csv, state.cands, { runTag });
   rescoreAll(state.cands, state.conf);
-  /* 取得済み台帳に積む(次回キューから自動で外れる) */
   markDirty();
-  toast(`${runTag} を解析しました(機械合格 ${run.machinePassed}名 / 候補ボードへ ${res.added}件追加)`);
+  const tagNote = absorbed.tags.length
+    ? ` / タグ別:${absorbed.tags.slice(0, 3).map(t => `${t.tag} ${t.fetched}件`).join("・")}`
+    : "";
+  toast(`${runTag} を解析しました(機械合格 ${run.machinePassed}名 / 候補ボードへ ${res.added}件追加`
+    + `${absorbed.addedToPool ? ` / プールに ${absorbed.addedToPool}件` : ""}${tagNote})`);
   go("analysis");
 }
 function rowFromRun(r) {

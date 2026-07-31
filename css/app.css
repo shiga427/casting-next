@@ -191,3 +191,9 @@ input.ev.bad { border-color: var(--red); background: #FCF1F1; }
 .logrow { font-size: 12px; border-bottom: 1px dashed var(--line); padding: 6px 0; }
 .logrow b { color: var(--brand-700); }
 code { background: #F3EDE6; border-radius: 4px; padding: 1px 5px; font-size: 11.5px; }
+
+/* ---- 発掘モードのタグ選択(§5-2 ①)---- */
+.tagpick { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 10px 0; }
+.tagbox { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+  background: #FBF7F2; border: 1px solid var(--line); border-radius: 16px; padding: 4px 10px; cursor: pointer; }
+.tagbox:hover { border-color: var(--brand-500); }

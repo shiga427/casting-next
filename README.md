@@ -31,15 +31,18 @@ python3 -m http.server 8765
 ```
 
 1. 最初の画面でプロジェクト名を入れて「このブランドで始める」
-2. 左の **収集(キューと依頼文)** を開く
+2. 左の **収集(キューと依頼文)** を開く。手持ちのリストが無い人は既定の
+   **「① 発掘から始める」**タブで、探索タグを選んで「発掘依頼文を作ってコピー」
+   (タグ検索での候補収集からプロフィール取得までを1回の依頼で頼む形になります)
 3. `tests/fixtures/run6_compact.jsonl`(匿名化済みサンプル)をドロップ枠に落とす
 4. その場で解析され、**分析結果**画面に切り替わります(機械合格13名・帯内35・落ち理由の内訳…)
-5. **概要**と**候補ボード**にも同じデータが反映されます
+5. **概要**と**候補ボード**にも同じデータが反映されます。
+   同時にプール・取得済み台帳・探索カバレッジ表も更新され、2周目は「② プールから取得」が使えます
 
 ## テスト
 
 ```bash
-node --test tests/*.test.js      # 79件。CI(push時)でも同じものが回ります
+node --test tests/*.test.js      # 89件。CI(push時)でも同じものが回ります
 ```
 
 | テスト | 何を保証するか |
@@ -52,7 +55,8 @@ node --test tests/*.test.js      # 79件。CI(push時)でも同じものが回�
 | `alerts.test.js` | 自動診断アラート12本の発火条件を1本ずつ |
 | `qual_report.test.js` | 精査3ファイルから、**Python版 qual_report.py と同じ内容**が出ること・未記入で完了不可 |
 | `rankqueue.test.js` | キュー並べ替え・取得済み除外(username照合の回帰)・ブランド疑い/判断22の隔離 |
-| `request_template.test.js` | 依頼文に禁止事項と落とし穴対策(140字・taken_at降順・429中断ほか)が入っていること |
+| `request_template.test.js` | 取得依頼文・**発掘依頼文**に禁止事項と落とし穴対策(140字・taken_at降順・429中断ほか)が入っていること |
+| `discovery.test.js` | 発掘由来のハンドルがプール・取得済み台帳・探索カバレッジ表に自動で入り、2周目に除外が効くこと |
 
 期待値は手書きではなく、移植元(Python / v1.4 HTML)を実際に実行して生成しています:
 
@@ -61,6 +65,8 @@ node tools/build_fixtures.mjs      # 匿名化fixtureを作る(reference/ が必
 python3 tools/gen_run6_expected.py # 期待値を Python版パイプラインから作る
 node tools/gen_v14_expected.mjs    # 期待値を 管制室v1.4 の採点コードから作る
 node tools/e2e_smoke.mjs           # 実ブラウザでドロップ→分析結果までの通し確認+スクショ
+node tools/e2e_discovery.mjs       # プールCSVなし(発掘モード)での通し確認
+node tools/e2e_v14.mjs             # 管制室v1.4 検証のうちDOMが要る3項目
 ```
 
 ## リポジトリに置かないもの
