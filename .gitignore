@@ -30,10 +30,12 @@ postscreen_review*.csv
 候補リスト_*.md
 stembeaute_casting_*.json
 
-# ただし匿名化済みfixtureは明示的に許可(tools/ が生成したものだけ)
+# ただし匿名化済みfixtureとオンボーディング用サンプルは明示的に許可
+# (どちらも tools/build_fixtures.mjs が匿名化して生成したもの)
 !tests/fixtures/*.jsonl
 !tests/fixtures/*.json
 !tests/fixtures/*.csv
+!samples/*.jsonl
 
 # OS / エディタ
 .DS_Store
