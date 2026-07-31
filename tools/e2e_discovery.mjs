@@ -73,14 +73,23 @@ try {
   await evaluate(`window.BASE = ${JSON.stringify(URL_BASE)}`);
 
   /* 新規プロジェクトを作る(ウィザードのクリックだけ。サンプルは読まずデータゼロのまま) */
-  await evaluate(`(() => { const b = document.getElementById('wNext1'); if (b) b.click(); })()`);
-  await sleep(500);
-  await evaluate(`(() => { const b = document.getElementById('wNext2'); if (b) b.click(); })()`);
-  await sleep(300);
-  await evaluate(`(() => { const b = document.getElementById('wSkip'); if (b) b.click(); })()`);
+  const clickWhenReady = async id => {
+    for (let i = 0; i < 25; i++) {
+      if (await evaluate(`(() => { const b = document.getElementById('${id}'); if (b) { b.click(); return true; } return false; })()`)) return true;
+      await sleep(300);
+    }
+    return false;
+  };
+  await clickWhenReady("wNext1");
+  await clickWhenReady("wNext2");
+  await clickWhenReady("wSkip");
   await sleep(300);
   await evaluate(`location.hash = '#/collect'`);
-  await sleep(900);
+  /* 発掘タブはプリセットを fetch してから描画するので、タグが並ぶまで待つ(公開URLは遅い) */
+  for (let i = 0; i < 30; i++) {
+    await sleep(400);
+    if (await evaluate(`document.querySelectorAll('.tagchk').length > 0`)) break;
+  }
 
   /* ① 既定タブが発掘モードで、プール警告が出ていない */
   const first = await evaluate(`(async () => {
