@@ -120,6 +120,18 @@ export function buildReport({ captionsText, commentsText, profileText, handle })
   };
 }
 
+/* 精査待ちの上位N名(§5-6・§4-1c:優先順位付けは全候補共通で**得点率**)。
+ * 足切り・対象外帯・第0候補(10万超)は精査対象にしない。精査済みも外す。 */
+export function qualTargets(cands, limit = 10) {
+  return (cands || [])
+    .filter(c => c.score && !c.score.cut && c.score.rate != null
+      && c.score.tier !== "out" && c.score.tier !== "mega"
+      && !(c.qualReport && c.qualReport.done)
+      && c.status !== "見送り")
+    .sort((a, b) => b.score.rate - a.score.rate)
+    .slice(0, limit);
+}
+
 export const HUMAN_FIELDS = [
   ["agreeStance", "1. 語りの向きの判定に同意するか。しないならどの一文が根拠か"],
   ["bestQuote", "2. 引用のうち、いちばん効いている一文とその理由"],

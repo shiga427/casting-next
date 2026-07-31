@@ -7,15 +7,15 @@
 import { state, markDirty } from "../store.js";
 import { esc } from "../charts.js";
 import { toast } from "../app.js";
-import { buildReport, HUMAN_FIELDS, isComplete, toMarkdown } from "../pipeline/qualReport.js";
+import { buildReport, HUMAN_FIELDS, isComplete, toMarkdown, qualTargets } from "../pipeline/qualReport.js";
 
 const MAX_PER_ROUND = 2;
+const REQUEST_LIMIT = 10;   /* 依頼文にまとめる人数(精査は2名/回だが、データ収集は先にまとめて頼める) */
 let draft = { handle: "", captionsText: "", commentsText: "", profileText: "", report: null };
 
 function targets() {
   /* 精査待ち(得点率順)の上位。候補ボードの並びと同じ */
-  return state.cands.filter(c => c.status === "候補" && c.score && !c.score.cut && c.score.rate != null)
-    .sort((a, b) => b.score.rate - a.score.rate);
+  return qualTargets(state.cands, 100);
 }
 function doneThisRound() {
   return state.cands.filter(c => c.qualReport && c.qualReport.done).length;
@@ -31,6 +31,17 @@ export function render() {
 
   <div class="cols">
     <div>
+      <div class="card">
+        <h3>⓪ 精査データを集めてもらう<span class="r">上位${Math.min(REQUEST_LIMIT, list.length)}名ぶんをまとめて依頼</span></h3>
+        <p class="hint">精査には「キャプション全文・コメント欄・bio全文」が要ります(取得時の140字では足りません)。
+          得点率の高い順に上位${REQUEST_LIMIT}名ぶんの収集依頼文を作ります。</p>
+        <div class="toolrow">
+          <button class="btn" id="btnQualReq" ${list.length ? "" : "disabled"}>精査データ依頼文を作ってコピー</button>
+          <span class="hint">${list.length ? `対象:${list.slice(0, REQUEST_LIMIT).map(c => "@" + esc(c.username)).join("、")}` : "精査待ちがいません"}</span>
+        </div>
+        <textarea id="qualReqText" rows="8" placeholder="ボタンを押すとここに出ます(コピー済み)"></textarea>
+      </div>
+
       <div class="card">
         <h3>① 精査データ(3ファイル)をドロップ<span class="r">captions / comments / profile</span></h3>
         <div class="drop" id="dropQual">
@@ -105,7 +116,49 @@ function reportCard(r) {
   </div>`;
 }
 
+/* 精査データ収集の依頼文(§8-3 の精査データ収集節を上位N名で埋めたもの) */
+async function makeQualRequest() {
+  const list = targets().slice(0, REQUEST_LIMIT);
+  if (!list.length) { toast("精査待ちの候補がいません", true); return; }
+  const [tpl, ver] = await Promise.all([
+    fetch("kit/qual_request_template.md").then(r => r.text()),
+    fetch("kit/version.json").then(r => r.json()).catch(() => ({ kit: "?" }))
+  ]);
+  const base = location.origin + location.pathname.replace(/[^/]*$/, "") + "kit";
+  const handles = list.map((c, i) => {
+    const sc = c.score || {};
+    const stance = c.qualStance ? ` / 語りの向き(一次判定): ${String(c.qualStance).split("(")[0]}` : "";
+    return `${i + 1}. @${c.username}(得点率 ${sc.rate}%${sc.mode === "rescue" ? "・救済採点" : ""}`
+      + ` / フォロワー ${c.followers == null ? "不明" : Number(c.followers).toLocaleString("ja-JP")}${stance})`;
+  }).join("\n");
+  const text = tpl
+    .replaceAll("{COUNT}", String(list.length))
+    .replaceAll("{HANDLES}", handles)
+    .replaceAll("{KIT_URL}", base)
+    .replaceAll("{BRAND}", (state.project && state.project.name) || "")
+    .replaceAll("{KIT_VERSION}", ver.kit || "?");
+  document.getElementById("qualReqText").value = text;
+  copyText(text, `精査データ依頼文をコピーしました(${list.length}名ぶん)`);
+}
+
+function copyText(text, msg) {
+  const fallback = () => {
+    const ta = document.getElementById("qualReqText");
+    if (ta) {
+      ta.value = text; ta.focus(); ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      if (ok) { toast(msg); return; }
+    }
+    toast("自動コピーができませんでした。下のテキスト欄を選択してコピーしてください", true);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast(msg), fallback);
+  else fallback();
+}
+
 export function mount() {
+  const qreq = document.getElementById("btnQualReq");
+  if (qreq) qreq.onclick = makeQualRequest;
   const drop = document.getElementById("dropQual"), file = document.getElementById("fileQual");
   drop.onclick = () => file.click();
   drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };

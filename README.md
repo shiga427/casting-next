@@ -42,7 +42,7 @@ python3 -m http.server 8765
 ## テスト
 
 ```bash
-node --test tests/*.test.js      # 89件。CI(push時)でも同じものが回ります
+node --test tests/*.test.js      # 95件。CI(push時)でも同じものが回ります
 ```
 
 | テスト | 何を保証するか |
@@ -57,6 +57,7 @@ node --test tests/*.test.js      # 89件。CI(push時)でも同じものが回�
 | `rankqueue.test.js` | キュー並べ替え・取得済み除外(username照合の回帰)・ブランド疑い/判断22の隔離 |
 | `request_template.test.js` | 取得依頼文・**発掘依頼文**に禁止事項と落とし穴対策(140字・taken_at降順・429中断ほか)が入っていること |
 | `discovery.test.js` | 発掘由来のハンドルがプール・取得済み台帳・探索カバレッジ表に自動で入り、2周目に除外が効くこと |
+| `qual_request.test.js` | 精査データ依頼文の書式が精査画面のパーサでそのまま読めること・対象は得点率上位10名 |
 
 期待値は手書きではなく、移植元(Python / v1.4 HTML)を実際に実行して生成しています:
 
@@ -66,6 +67,7 @@ python3 tools/gen_run6_expected.py # 期待値を Python版パイプラインか
 node tools/gen_v14_expected.mjs    # 期待値を 管制室v1.4 の採点コードから作る
 node tools/e2e_smoke.mjs           # 実ブラウザでドロップ→分析結果までの通し確認+スクショ
 node tools/e2e_discovery.mjs       # プールCSVなし(発掘モード)での通し確認
+node tools/e2e_qual_request.mjs    # 精査データ依頼文(上位10名)の生成確認
 node tools/e2e_v14.mjs             # 管制室v1.4 検証のうちDOMが要る3項目
 ```
 
