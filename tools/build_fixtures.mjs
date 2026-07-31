@@ -518,43 +518,13 @@ const legacy = {
 };
 writeFileSync(join(OUT, "legacy_v11_sample.json"), JSON.stringify(legacy, null, 1), "utf8");
 
-/* ---- 出力4:精査データ3ファイル(P6のテスト用・匿名化) --------------- */
-/* qual_report.py と同じ入力形式のまま、ハンドル・表示名・コメント投稿者を差し替える。
- * 対象は全文キャプションが残っている1名だけ(コメント欄が本体なので comments がある方を選ぶ)。 */
-(() => {
-  const dir = join(REF, "成果物_run6");
-  let files = [];
-  try { files = readdirSync(dir); } catch (e) { return; }
-  const capFiles = files.filter(f => /_captions\.txt$/.test(f));
-  let chosen = null;
-  for (const f of capFiles) {
-    const base = f.replace(/_captions\.txt$/, "");
-    if (files.includes(base + "_comments.txt")) { chosen = base; break; }
-  }
-  if (!chosen) return;
-  const head = readFileSync(join(dir, chosen + "_captions.txt"), "utf8").slice(0, 400);
-  const orig = (head.match(/#\s*handle=([^\s]+)/) || [])[1] || "";
-  const anonHandle = "sample_qual";
-  /* コメント投稿者(user=@xxx)は連番の匿名IDに置き換える */
-  const readerMap = new Map();
-  const anonReader = h => {
-    if (!readerMap.has(h)) readerMap.set(h, "reader_" + String(readerMap.size + 1).padStart(3, "0"));
-    return readerMap.get(h);
-  };
-  const scrub = text => stripLoneSurrogates(String(text)
-    .replace(/user=@([^\s]+)/g, (_, h) => "user=@" + anonReader(h))
-    .replace(/@([A-Za-z0-9._]{2,})/g, (_, h) => "@" + anonReader(h))
-    .replace(/https?:\/\/[^\s]+/g, "https://example.com/x")
-    .replaceAll(orig, anonHandle));
-  ["captions", "comments", "profile"].forEach(kind => {
-    const src = join(dir, `${chosen}_${kind}.txt`);
-    try {
-      writeFileSync(join(OUT, `${anonHandle}_${kind}.txt`), scrub(readFileSync(src, "utf8")), "utf8");
-    } catch (e) { /* profile が無い場合はスキップ */ }
-  });
-  console.log(`精査fixture: ${anonHandle}_{captions,comments,profile}.txt(読者 ${readerMap.size}名を匿名化)`);
-})();
-
+/* ---- 精査データ3ファイル(P6のテスト用)について ----------------------
+ * ここでは生成しない。tests/fixtures/sample_qual_*.txt は**合成データ**を手で置いている。
+ * 理由:精査ファイルは1人分のキャプション・コメントの全文であり、ハンドルを置換しても
+ * 本文そのものが残る。公開リポジトリに置く必要はなく、パーサと判定の同一性検証は
+ * 同じ形式の合成データで十分達成できる(落とし穴:本文中の `---`・メタ行・[biography] を再現済み)。
+ * 期待値は tools/gen_qual_expected.py が Python版 qual_report.py を合成データに適用して作る。
+ */
 writeFileSync(join(OUT, "run6_stance_notes.json"), JSON.stringify(stanceNotes, null, 1), "utf8");
 console.log("stance補完:", stanceNotes.length + "件", stanceNotes.map(n => n.handle + "(" + n.category + "×" + n.added.length + ")").join(" "));
 console.log("書き出し:", ["run6_compact.jsonl", "v3_export_sample.json", "legacy_v11_sample.json"].join(" / "));
