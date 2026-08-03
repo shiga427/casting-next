@@ -61,11 +61,12 @@ export function buildCdpQual(cands, opts) {
   };
 }
 
-/* 人向けの1行サマリ。「60点以上N件中、今回はM件、残りK件は次回」を必ず言う。 */
+/* 人向けの1行サマリ。対象人数と、不足・繰り越しを必ず言う(黙って切り捨てない)。
+ * 「今回」「◯名/回」という語は使わない(1回あたりの人数上限という概念は無いため)。 */
 export function cdpQualSummary(p) {
-  const base = `${p.minScore}点以上 ${p.eligible}件中、今回は ${p.handles.length}件`;
-  const rest = p.deferred > 0 ? `、残り ${p.deferred}件は次回` : "";
-  const short = p.shortfall > 0 ? `（${p.fillTarget}件に ${p.shortfall}件不足。発掘で補充します）` : "";
+  const base = `スコア${p.minScore}点以上 ${p.eligible}名`;
+  const rest = p.deferred > 0 ? `（1回に渡せるのは ${p.handles.length}名まで。残り ${p.deferred}名は次回）` : "";
+  const short = p.shortfall > 0 ? `（${p.fillTarget}名に ${p.shortfall}名不足。拡張③が自動発掘で補充）` : "";
   return base + rest + short;
 }
 

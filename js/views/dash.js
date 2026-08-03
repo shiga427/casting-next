@@ -4,6 +4,8 @@ import { state } from "../store.js";
 import { esc, donut } from "../charts.js";
 import { buildAlerts } from "../alerts.js";
 import { totalOf } from "../pipeline/sbis.js";
+import { qualTargets } from "../pipeline/qualReport.js";
+import { QUAL_MIN_SCORE } from "../pipeline/conf.js";
 
 function activeRun() {
   if (!state.runs.length) return null;
@@ -16,8 +18,9 @@ export function render() {
   const prev = state.runs.length > 1 ? state.runs[1] : null;
   const inBand = cs.filter(c => c.score && (c.score.tier === "micro" || c.score.tier === "middle")).length;
   const passed = cs.length;
-  const waiting = cs.filter(c => c.status === "候補" && c.score && !c.score.cut && c.score.tier !== "out" && c.score.tier !== "mega" && c.score.rate != null)
-    .sort((a, b) => b.score.rate - a.score.rate);
+  /* 精査待ちの定義は精査画面と同じ1つに揃える(スコア QUAL_MIN_SCORE 点以上・高い順)。
+   * 2026-08-03: ここに別条件を書いていたため、画面ごとに「対象」の人数が食い違っていた */
+  const waiting = qualTargets(cs);
   const contracted = cs.filter(c => c.status === "契約");
   const serial = contracted.filter(c => c.slot === "連載枠");
   const sMid = serial.filter(c => c.score && c.score.tier === "middle").length;
@@ -49,7 +52,7 @@ export function render() {
       <div class="d">${run ? `帯内率 ${(run.inBand / Math.max(run.succeeded, 1) * 100).toFixed(0)}%` : "—"}</div></div>
     <div class="kpi"><div class="l">機械合格</div><div class="v">${run ? run.machinePassed : 0}</div>
       <div class="d">${run ? `帯内有効率 ${(run.machinePassed / Math.max(run.inBand, 1) * 100).toFixed(1)}%` : "—"}</div></div>
-    <div class="kpi"><div class="l">精査待ち</div><div class="v">${waiting.length}</div><div class="d">得点率順・今回の上限 2名</div></div>
+    <div class="kpi"><div class="l">精査待ち</div><div class="v">${waiting.length}</div><div class="d">スコア${QUAL_MIN_SCORE}点以上・高い順</div></div>
     <div class="kpi"><div class="l">契約 連載枠</div><div class="v">${serial.length}<small>/4</small></div><div class="d">ミドル${sMid}+成長マイクロ${sGrow}</div></div>
     <div class="kpi"><div class="l">契約 都度枠</div><div class="v">${spot}<small>/10</small></div><div class="d">資料送付中 ${docSent}</div></div>
   </div>
@@ -70,14 +73,14 @@ export function render() {
 
     <div>
       <div class="card">
-        <h3>次のアクション:精査待ち(得点率順・2名/回)</h3>
+        <h3>次のアクション:精査待ち(${QUAL_MIN_SCORE}点以上・高い順)</h3>
         ${waiting.length ? waiting.slice(0, 5).map((c, i) => `
-          <div class="rowitem" style="${i >= 2 ? "opacity:.45" : ""}">
+          <div class="rowitem">
             <span class="rk">${i + 1}</span><span class="h">@${esc(c.username)}</span>
             ${c.sig && c.sig.life.length && !c.sig.biz.length ? `<span class="tag g">🟢生活者</span>` : ""}
             ${c.score.mode === "rescue" ? `<span class="tag res">救済 /75</span>` : ""}
-            <span class="sc">得点率 ${c.score.rate}%</span>
-          </div>`).join("") + `<div class="note">3人目以降は今回の精査対象外です(まとめてやると精査の質が落ちるため、上限2名/回)。</div>`
+            <span class="sc">${c.score.total}点</span>
+          </div>`).join("") + `<div class="note">スコア${QUAL_MIN_SCORE}点以上を全員、高い順に精査します。</div>`
         : `<div class="hint">精査待ちはありません。</div>`}
       </div>
 

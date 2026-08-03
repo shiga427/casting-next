@@ -146,9 +146,9 @@ async function readQualCfg() {
 function qualLine(cfg) {
   const n = (cfg.eligible == null ? (cfg.handles || []).length : cfg.eligible);
   const deferred = cfg.deferred || 0;
-  return `${cfg.minScore || QUAL_FALLBACK.minScore}点以上 ${n}件`
-    + (deferred > 0 ? `（今回 ${(cfg.handles || []).length}件 / 残り ${deferred}件は次回）` : '')
-    + ((cfg.shortfall || 0) > 0 ? `（${cfg.fillTarget || QUAL_FALLBACK.fillTarget}件に ${cfg.shortfall}件不足）` : '');
+  return `スコア${cfg.minScore || QUAL_FALLBACK.minScore}点以上 ${n}名`
+    + (deferred > 0 ? `（1回に渡せるのは ${(cfg.handles || []).length}名まで。残り ${deferred}名は次回）` : '')
+    + ((cfg.shortfall || 0) > 0 ? `（${cfg.fillTarget || QUAL_FALLBACK.fillTarget}名に ${cfg.shortfall}名不足）` : '');
 }
 async function reloadQualHandles() {
   const r = await readQualCfg();

@@ -1,8 +1,11 @@
 /* 精査・定性評価 — 設計書§5-6(qual_report.py の画面化)。
- * ・精査は **2名/回の上限**。3人目を開こうとすると確認を挟む(まとめてやると質が落ちる)
+ * ・対象は **スコア QUAL_MIN_SCORE 点以上の全員**(得点率の高い順)。1回あたりの人数上限は無い
+ *   (2026-08-03: 旧「2名/回のレビュー枠」を撤廃。収集対象と精査対象が食い違い、
+ *    同じ人が「対象」かつ「対象外」に見える自己矛盾を起こしていたため。人数の充足は拡張③の自動発掘の役目)
  * ・入力:captions / comments / profile の3ファイルをドロップ
  * ・自動生成部:語りの向き一次判定+引用+コメントのQ&Aペア+投稿の並び
  * ・人が書く欄:**未記入のまま「精査完了」にできない**(「空欄のまま提出しない」の強制化)
+ *   ↑これは1人あたりの質の担保。人数上限とは別物なので残す
  */
 import { state, markDirty } from "../store.js";
 import { esc } from "../charts.js";
@@ -11,15 +14,14 @@ import { buildReport, HUMAN_FIELDS, isComplete, toMarkdown, qualTargets } from "
 import { buildCdpQual, cdpQualSummary, exportCdpQual } from "../pipeline/cdpQual.js";
 import { QUAL_MAX_COLLECT, QUAL_MIN_SCORE } from "../pipeline/conf.js";
 
-const MAX_PER_ROUND = 2;
-const REQUEST_LIMIT = QUAL_MAX_COLLECT;   /* 依頼文にまとめる人数(精査は2名/回だが、データ収集は先にまとめて頼める) */
+const REQUEST_LIMIT = QUAL_MAX_COLLECT;   /* 依頼文1本にまとめる人数の上限(依頼文の長さの都合。精査人数の上限ではない) */
 let draft = { handle: "", captionsText: "", commentsText: "", profileText: "", report: null };
 
 function targets() {
-  /* 精査待ち = スコア QUAL_MIN_SCORE 点以上(得点率順)。上位N名固定ではない */
+  /* 対象 = スコア QUAL_MIN_SCORE 点以上(得点率の高い順)。収集対象も精査対象もこれ1つ */
   return qualTargets(state.cands);
 }
-function doneThisRound() {
+function doneCount() {
   return state.cands.filter(c => c.qualReport && c.qualReport.done).length;
 }
 
@@ -30,15 +32,15 @@ export function render() {
   const r = draft.report;
   return `
   <div class="head"><h1>精査・定性評価</h1>
-    <span class="meta">上限 ${MAX_PER_ROUND}名/回(まとめてやると精査の質が落ちます)。完了 ${doneThisRound()}名</span></div>
+    <span class="meta">対象 スコア${QUAL_MIN_SCORE}点以上 ${list.length}名 / 精査完了 ${doneCount()}名</span></div>
 
   <div class="cols">
     <div>
       <div class="card">
         <h3>⓪ 精査データを集めてもらう<span class="r">${Math.min(REQUEST_LIMIT, list.length)}名ぶんをまとめて依頼</span></h3>
         <p class="hint">精査には「キャプション全文・コメント欄・bio全文」が要ります(取得時の140字では足りません)。
-          <b>スコア${QUAL_MIN_SCORE}点以上を対象（${cdp.fillTarget}件に満たなければ自動で発掘して補充）。</b>
-          ${esc(cdpQualSummary(cdp))}</p>
+          <b>${esc(cdpQualSummary(cdp))}</b><br>
+          この依頼文に載るのは<b>現在の${QUAL_MIN_SCORE}点以上だけ</b>です(不足分の自動発掘は拡張③の経路でのみ動きます)。</p>
         <div class="toolrow">
           <button class="btn" id="btnQualReq" ${list.length ? "" : "disabled"}>精査データ依頼文を作ってコピー</button>
           <span class="hint">${list.length ? `対象:${list.slice(0, REQUEST_LIMIT).map(c => "@" + esc(c.username)).join("、")}` : `${QUAL_MIN_SCORE}点以上の候補がいません（発掘で母数を足してください）`}</span>
@@ -62,12 +64,13 @@ export function render() {
 
     <div>
       <div class="card">
-        <h3>精査待ち(${QUAL_MIN_SCORE}点以上・得点率順)</h3>
-        ${list.slice(0, 8).map((c, i) => `<div class="rowitem" style="${i >= MAX_PER_ROUND ? "opacity:.45" : ""}">
+        <h3>精査待ち(${QUAL_MIN_SCORE}点以上・高い順)</h3>
+        ${list.slice(0, QUAL_MAX_COLLECT).map((c, i) => `<div class="rowitem">
           <span class="rk">${i + 1}</span><span class="h">@${esc(c.username)}</span>
           ${c.qualReport ? `<span class="tag ${c.qualReport.done ? "g" : "res"}">${c.qualReport.done ? "精査済" : "下書き"}</span>` : ""}
-          <span class="sc">${c.score.rate}%</span></div>`).join("") || `<div class="hint">${QUAL_MIN_SCORE}点以上の精査待ちはいません。①発掘で母数を足してください。</div>`}
-        <div class="note">3人目以降は今回の精査対象外です。順番に済ませてください。</div>
+          <span class="sc">${c.score.total}点</span></div>`).join("") || `<div class="hint">${QUAL_MIN_SCORE}点以上の精査待ちはいません。①発掘で母数を足してください。</div>`}
+        ${list.length > QUAL_MAX_COLLECT ? `<div class="hint">…他 ${list.length - QUAL_MAX_COLLECT} 名</div>` : ""}
+        <div class="note">スコア${QUAL_MIN_SCORE}点以上を全員、得点率の高い順に精査します。</div>
       </div>
 
       ${reports.length ? `<div class="card">
@@ -230,10 +233,6 @@ function read(files) {
     if (!m) { toast(`ファイル名から種別が読めません: ${f.name}`, true); return; }
     const [, handle, kind] = m;
     if (draft.handle && draft.handle !== handle) draft = { handle: "", captionsText: "", commentsText: "", profileText: "", report: null };
-    /* 上限2名/回:3人目を開こうとしたら確認を挟む */
-    if (!draft.handle && doneThisRound() >= MAX_PER_ROUND) {
-      if (!confirm(`今回すでに ${doneThisRound()}名を精査しています。まとめてやると精査の質が落ちます。続けますか?`)) return;
-    }
     draft.handle = handle;
     const r = new FileReader();
     r.onload = () => {

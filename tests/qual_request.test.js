@@ -141,5 +141,10 @@ test("精査指示(castnext_cdp_qual)に不足人数と発掘プランが入る"
   assert.equal(q.eligible, 21);
   assert.equal(q.deferred, 21 - QUAL_MAX_COLLECT);
   assert.equal(q.shortfall, 0);
-  assert.ok(cdpQualSummary(q).includes("残り " + (21 - QUAL_MAX_COLLECT) + "件"), "切り捨てぶんを言っていない");
+  assert.ok(cdpQualSummary(q).includes("残り " + (21 - QUAL_MAX_COLLECT) + "名"), "繰り越しぶんを言っていない");
+  /* 「今回」「◯名/回」という語は使わない(1回あたりの人数上限という概念は廃止した) */
+  [cdpQualSummary(q), cdpQualSummary(p)].forEach(t => {
+    assert.ok(!t.includes("今回"), "「今回」が残っている: " + t);
+    assert.ok(!/名\/回/.test(t), "「◯名/回」が残っている: " + t);
+  });
 });
