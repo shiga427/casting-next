@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { --wine:#6d1f3a; --ink:#2b2430; --line:#e7dfe4; }
+    body { width: 340px; margin: 0; font: 13px/1.6 -apple-system, system-ui, sans-serif; color: var(--ink); }
+    header { background: var(--wine); color: #fff; padding: 12px 14px; }
+    header h1 { margin: 0; font-size: 14px; letter-spacing: .04em; }
+    header p { margin: 2px 0 0; font-size: 11px; opacity: .85; }
+    main { padding: 12px 14px; }
+    .row { margin-bottom: 10px; }
+    .btn { display: block; width: 100%; box-sizing: border-box; padding: 9px 12px; border: 0;
+           border-radius: 8px; background: var(--wine); color: #fff; font-weight: 700; cursor: pointer; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .btn.ghost { background: #fff; color: var(--wine); border: 1px solid var(--wine); font-weight: 600; }
+    .hint { font-size: 11px; color: #7a707c; }
+    textarea { width: 100%; box-sizing: border-box; height: 66px; border: 1px solid var(--line);
+               border-radius: 6px; padding: 6px; font: 11px/1.4 ui-monospace, monospace; resize: vertical; }
+    #status { font-size: 12px; white-space: pre-wrap; max-height: 120px; overflow: auto;
+              background: #faf6f8; border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin-top: 8px; }
+    .bar { height: 6px; background: #eee; border-radius: 4px; overflow: hidden; margin-top: 6px; }
+    .bar > i { display: block; height: 100%; width: 0; background: var(--wine); transition: width .2s; }
+    .warn { color: #b3261e; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Casting Next 収集</h1>
+    <p>Claude非経由・取得のみ（DM/フォロー/いいねはしません）</p>
+  </header>
+  <main>
+    <div class="row">
+      <div id="queueInfo" class="hint">キューを読み込み中…</div>
+    </div>
+    <div class="row">
+      <button id="btnReload" class="btn ghost">ダッシュボードからキュー再取得</button>
+    </div>
+    <div class="row">
+      <div class="hint">キューが取れない場合は、ハンドルを1行1件で貼り付け:</div>
+      <textarea id="manual" placeholder="handle1&#10;handle2&#10;@handle3"></textarea>
+    </div>
+    <div class="row">
+      <button id="btnRun" class="btn" disabled>収集を実行</button>
+      <div class="bar"><i id="barFill"></i></div>
+    </div>
+    <div id="status">準備中…</div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

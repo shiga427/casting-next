@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Casting Next 収集ツール",
+  "version": "1.0.0",
+  "description": "instagram.com のログインセッションで、キャスティング管制室の収集をボタン1回で行う（Claude/LLM非経由）。取得のみ・DM/フォロー/いいねは一切しない。",
+  "permissions": ["scripting", "downloads", "tabs", "storage"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://instagram.com/*",
+    "https://shiga427.github.io/*"
+  ],
+  "action": {
+    "default_title": "Casting Next 収集",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*", "https://instagram.com/*"],
+      "js": ["igf/ig_probe.js", "igf/prof_compact.js", "content_ig.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": { "service_worker": "background.js" }
+}

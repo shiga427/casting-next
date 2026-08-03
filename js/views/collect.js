@@ -299,6 +299,20 @@ function loadDone(text, name) {
   markDirty();
   log(`✔ ${esc(name)}:取得済み ${done.length}件を読み込みました${done.length ? "" : "(⚠ 1件も読めていません。列名 handle / username を確認してください)"}`);
 }
+/* 拡張(Casting Next 収集ツール)向けに、素のハンドル列を localStorage に書き出す。
+ * 拡張の popup がここを読み、instagram.com のタブでボタン1回で収集する。
+ * ダッシュボード自体の動作には影響しない（読む側が居なければ無害）。 */
+function exportCdpQueue(q) {
+  try {
+    if (!q || !q.queue || !q.queue.length) return;
+    localStorage.setItem("castnext_cdp_queue", JSON.stringify({
+      runTag: q.runTag || "run",
+      at: q.at || "",
+      handles: q.queue.map(r => ({ handle: r.handle, tags: r.tags || "" })),
+    }));
+  } catch (e) { /* localStorage 不可の環境では黙ってスキップ */ }
+}
+
 function makeQueue() {
   const q = state.queue || {};
   if (!q.pool || !q.pool.length) {
@@ -309,6 +323,7 @@ function makeQueue() {
   const res = buildQueue(q.pool, doneSet(), limit);
   state.queue = { ...q, ...res, limit, mode: "pool", runTag: nextRunTag(), at: new Date().toISOString() };
   markDirty();
+  exportCdpQueue(state.queue); // 拡張(extension/)がボタン収集に使う素のハンドル列を localStorage に出す
   toast(`キューを作りました(${res.queue.length}件 / プール残 ${res.poolSize}件)`);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
