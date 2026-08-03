@@ -214,22 +214,25 @@ async function mountDiscover() {
   const chosen = () => [...document.querySelectorAll(".tagchk:checked")].map(c => c.value);
   document.querySelectorAll(".tagchk").forEach(c => c.onchange = () => {
     state.queue = { ...(state.queue || {}), tags: chosen() };
+    exportCdpDiscover(chosen());
     markDirty();
   });
   if ($("btnAll")) $("btnAll").onclick = () => {
     document.querySelectorAll(".tagchk").forEach(c => { c.checked = true; });
-    state.queue = { ...(state.queue || {}), tags: chosen() }; markDirty();
+    state.queue = { ...(state.queue || {}), tags: chosen() }; exportCdpDiscover(chosen()); markDirty();
   };
   if ($("btnLife")) $("btnLife").onclick = () => {
     const life = tagCache.filter(t => t.life).map(t => t.tag);
     document.querySelectorAll(".tagchk").forEach(c => { c.checked = life.includes(c.value); });
-    state.queue = { ...(state.queue || {}), tags: chosen() }; markDirty();
+    state.queue = { ...(state.queue || {}), tags: chosen() }; exportCdpDiscover(chosen()); markDirty();
   };
   if ($("dTarget")) $("dTarget").onchange = () => {
     state.queue = { ...(state.queue || {}), target: Number($("dTarget").value) || 100 };
+    exportCdpDiscover(chosen());
     markDirty();
   };
   if ($("btnDiscover")) $("btnDiscover").onclick = () => makeDiscoveryRequest(chosen());
+  exportCdpDiscover(chosen()); // 画面表示時点の選択を拡張へ渡す
 }
 
 async function makeDiscoveryRequest(tags) {
@@ -311,6 +314,20 @@ function exportCdpQueue(q) {
       handles: q.queue.map(r => ({ handle: r.handle, tags: r.tags || "" })),
     }));
   } catch (e) { /* localStorage 不可の環境では黙ってスキップ */ }
+}
+
+/* 拡張の「①発掘して収集」向けに、選択中のタグ・目標件数・取得済みを localStorage に出す。
+ * ダッシュボードの動作には影響しない（読む側が居なければ無害）。 */
+function exportCdpDiscover(tags) {
+  try {
+    const lifeSet = new Set((tagCache || []).filter(t => t.life).map(t => t.tag));
+    localStorage.setItem("castnext_cdp_discover", JSON.stringify({
+      tags: (tags || []).map(t => ({ tag: t, life: lifeSet.has(t) })),
+      target: Number((document.getElementById("dTarget") || {}).value) || 100,
+      done: [...doneSet()],
+      at: new Date().toISOString(),
+    }));
+  } catch (e) { /* localStorage 不可なら黙ってスキップ */ }
 }
 
 function makeQueue() {
