@@ -24,6 +24,32 @@ async function injectResult(jsonl, filename) {
   return tryImport() ? 'ok-after-nav' : 'no-input';
 }
 
+// 精査の3ファイル（先頭ハンドル分）を精査画面の隠しファイル入力に差し込む（ドロップ再現）
+async function injectQualFiles(files) {
+  function tryImport() {
+    const input = document.getElementById('fileQual');
+    if (!input) return false;
+    const dt = new DataTransfer();
+    for (const f of files) dt.items.add(new File([f.text], f.name, { type: 'text/plain' }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  if (tryImport()) return 'ok';
+  if (!String(location.hash).startsWith('#/qual')) location.hash = '#/qual';
+  await new Promise((r) => setTimeout(r, 1000));
+  return tryImport() ? 'ok-after-nav' : 'no-input';
+}
+
+async function autoImportQual(files) {
+  try {
+    const tabs = await chrome.tabs.query({ url: ['https://shiga427.github.io/casting-next*'] });
+    if (!tabs || !tabs.length) return { done: false, reason: 'no-dashboard-tab' };
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: injectQualFiles, args: [files] });
+    return { done: (res && (res.result === 'ok' || res.result === 'ok-after-nav')), result: res && res.result };
+  } catch (e) { return { done: false, reason: String(e && e.message) }; }
+}
+
 async function autoImport(jsonl, filename) {
   try {
     const tabs = await chrome.tabs.query({ url: ['https://shiga427.github.io/casting-next*'] });
@@ -45,6 +71,26 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (p.phase === 'discover') { chrome.action.setBadgeText({ text: '🔍' }); chrome.action.setTitle({ title: `発掘中 ${p.i}/${p.n}（候補${p.found || 0}）` }); }
     else if (p.phase === 'discover_done') { chrome.action.setBadgeText({ text: '…' }); chrome.action.setTitle({ title: `発掘完了 取得対象${p.picked}件` }); }
     else if (p.phase === 'collect') { chrome.action.setBadgeText({ text: String(p.i) }); chrome.action.setTitle({ title: `取得中 ${p.i}/${p.n}｜@${p.handle}` }); }
+    else if (p.phase === 'qual') { chrome.action.setBadgeText({ text: '📝' }); chrome.action.setTitle({ title: `精査データ収集 ${p.i}/${p.n}｜@${p.handle}` }); }
+    return;
+  }
+  // 精査3ファイル: 全件ダウンロード＋先頭ハンドルを精査画面へ自動反映
+  if (msg && msg.type === 'IGF_QUAL_DONE') {
+    const files = msg.files || [];
+    for (const f of files) {
+      chrome.downloads.download({
+        url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(f.text || ''),
+        filename: 'casting-next/qual/' + String(f.name).replace(/[^\w.\-]/g, '_'), saveAs: false, conflictAction: 'uniquify',
+      });
+    }
+    const st = msg.stats || {};
+    chrome.action.setBadgeBackgroundColor({ color: st.stopped ? '#b3261e' : '#1a7f4b' });
+    chrome.action.setBadgeText({ text: st.stopped ? '!' : '✓' });
+    chrome.action.setTitle({ title: `精査データ完了 ${st.ok || 0}名分` });
+    setTimeout(() => { try { chrome.action.setBadgeText({ text: '' }); } catch (e) { /* noop */ } }, 20000);
+    const first = String(msg.firstHandle || '').toLowerCase();
+    const firstFiles = files.filter((f) => String(f.name).toLowerCase().startsWith(first + '_'));
+    autoImportQual(firstFiles).then((r) => { try { chrome.runtime.sendMessage({ type: 'IGF_AUTOIMPORT', result: r, qual: true }); } catch (e) { /* noop */ } });
     return;
   }
   if (!msg || msg.type !== 'IGF_DONE_DOWNLOAD') return;

@@ -140,6 +140,139 @@
     return { ok: true, jsonl: records.map((r) => JSON.stringify(r)).join('\n') + '\n', stats, runTag: payload.runTag || 'run' };
   }
 
+  // ---------------- 精査データ収集（全文キャプ・コメント・bio。140字に切り詰めない） ----------------
+  function igAppId() { const m = document.documentElement.innerHTML.match(/"X-IG-App-ID"\s*:\s*"(\d+)"/); return m ? m[1] : '936619743392459'; }
+  async function igFetch(url) {
+    try {
+      const r = await fetch(url, { headers: { 'X-IG-App-ID': igAppId(), 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' }, credentials: 'include', referrer: location.href });
+      const t = await r.text(); let b = null; try { b = JSON.parse(t); } catch (e) { /* noop */ }
+      return { status: r.status, body: b };
+    } catch (e) { return { status: 0, error: String(e) }; }
+  }
+  // IGF.profile の raw レスポンスから、全文キャプション付きの投稿配列を作る（taken_at降順・上位12）
+  function fullPosts(res) {
+    const posts = []; const R = res.responses || [];
+    for (const rr of R) {
+      const b = rr && rr.body; if (!b) continue;
+      const w = b.data && (b.data.user || (b.data.xdt_api__v1__users__web_profile_info && b.data.xdt_api__v1__users__web_profile_info.user));
+      if (w && w.edge_owner_to_timeline_media) {
+        for (const e of (w.edge_owner_to_timeline_media.edges || [])) {
+          const n = e.node || {};
+          posts.push({
+            code: n.shortcode, media_id: n.id, taken_at: n.taken_at_timestamp, media_type: n.is_video ? 2 : 1,
+            like: (n.edge_media_preview_like || {}).count, comment: (n.edge_media_to_comment || {}).count,
+            paid: !!n.is_paid_partnership, comments_disabled: !!n.comments_disabled,
+            caption: (((n.edge_media_to_caption || {}).edges || [{ node: {} }])[0] || { node: {} }).node.text || '',
+          });
+        }
+      }
+      if (b.items && b.items.length) {
+        for (const m of b.items) {
+          posts.push({
+            code: m.code, media_id: m.pk || m.id || '', taken_at: m.taken_at, media_type: m.media_type,
+            like: m.like_and_view_counts_disabled ? null : m.like_count, comment: m.comment_count,
+            paid: !!m.is_paid_partnership, comments_disabled: !!m.comments_disabled,
+            caption: (m.caption || {}).text || '',
+          });
+        }
+      }
+    }
+    const seen = new Set(); const uniq = [];
+    for (const p of posts) { if (!p.code || seen.has(p.code)) continue; seen.add(p.code); uniq.push(p); }
+    uniq.sort((a, b) => (b.taken_at || 0) - (a.taken_at || 0));
+    return uniq.slice(0, 12);
+  }
+  function fullProfile(res) {
+    for (const rr of (res.responses || [])) {
+      const b = rr && rr.body; if (!b) continue;
+      const w = b.data && (b.data.user || (b.data.xdt_api__v1__users__web_profile_info && b.data.xdt_api__v1__users__web_profile_info.user));
+      if (w) return { full_name: w.full_name, biography: w.biography, followers: (w.edge_followed_by || {}).count, following: (w.edge_follow || {}).count, media_count: (w.edge_owner_to_timeline_media || {}).count, external: w.external_url || '', bio_links: (w.bio_links || []).map((x) => x.url).filter(Boolean) };
+      if (b.user) { const u = b.user; return { full_name: u.full_name, biography: u.biography, followers: u.follower_count, following: u.following_count, media_count: u.media_count, external: u.external_url || '', bio_links: [] }; }
+    }
+    return null;
+  }
+  // コメント欄の生JSONは形が一定でないので、username+text を持つノードを木探索で拾う（形無依存）
+  function walkComments(body) {
+    const out = [];
+    (function w(o) {
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o)) { o.forEach(w); return; }
+      if (typeof o.text === 'string' && o.user && o.user.username) out.push({ username: o.user.username, text: o.text, created: o.created_at || o.created_at_utc || 0 });
+      for (const k in o) w(o[k]);
+    })(body);
+    // 重複除去（同一 username+text）
+    const seen = new Set(); const uniq = [];
+    for (const c of out) { const k = c.username + '' + c.text; if (seen.has(k)) continue; seen.add(k); uniq.push(c); }
+    uniq.sort((a, b) => (a.created || 0) - (b.created || 0));
+    return uniq;
+  }
+  async function fetchComments(mediaId) {
+    if (!mediaId) return [];
+    const r = await igFetch('/api/v1/media/' + encodeURIComponent(mediaId) + '/comments/?can_support_threading=true&permalink_enabled=false');
+    return r.body ? walkComments(r.body).slice(0, 50) : [];
+  }
+  function ymd(ts) { if (!ts) return '????-??-??'; return new Date(ts * 1000).toISOString().slice(0, 10); }
+  function typeName(mt) { return mt === 2 ? 'reel' : (mt === 8 ? 'carousel' : 'photo'); }
+  const today10 = () => new Date().toISOString().slice(0, 10);
+  function buildCaptions(handle, pk, posts) {
+    let out = `# handle=${handle} pk=${pk || ''} 直近12投稿(taken_at降順) 取得 ${today10()}\n# キャプションは API が返した全文をそのまま記載(切り詰めなし)\n\n`;
+    posts.forEach((p, i) => {
+      out += `[${i + 1}] ${ymd(p.taken_at)} like=${p.like == null ? '?' : p.like} comment=${p.comment == null ? '?' : p.comment} type=${typeName(p.media_type)} paid=${p.paid}\n`;
+      out += `code=${p.code || ''} media_id=${p.media_id || ''} taken_at=${p.taken_at || ''} media_type=${p.media_type || ''} comments_disabled=${p.comments_disabled} cap_len=${(p.caption || '').length}\n`;
+      out += (p.caption || '') + '\n';
+      if (i < posts.length - 1) out += '---\n';
+    });
+    return out;
+  }
+  function buildProfile(handle, prof) {
+    let out = `# handle=${handle} プロフィール 取得 ${today10()}\n`;
+    out += `full_name = ${(prof && prof.full_name) || ''}\n`;
+    out += `followers = ${prof && prof.followers != null ? prof.followers : ''}\n`;
+    out += `following = ${prof && prof.following != null ? prof.following : ''}\n`;
+    out += `media_count = ${prof && prof.media_count != null ? prof.media_count : ''}\n\n`;
+    const links = (prof && prof.bio_links && prof.bio_links.length) ? prof.bio_links.join('\n') : ((prof && prof.external) || '');
+    out += `[bio_links]\n${links}\n\n`;
+    out += `[biography 全文]\n${(prof && prof.biography) || ''}\n`;
+    return out;
+  }
+  function buildComments(handle, byPost) {
+    let out = `# handle=${handle} コメント欄(上位4投稿×最大50件) 取得 ${today10()}\n\n`;
+    let idx = 0, any = false;
+    for (const bp of byPost) {
+      for (const c of bp.comments) {
+        idx++; any = true;
+        const own = c.username && c.username.toLowerCase() === handle.toLowerCase();
+        out += `--- #${idx}  user=@${c.username || '?'}  own_reply=${own ? 'YES' : 'no'}  post=${bp.code}\n${c.text || ''}\n`;
+      }
+    }
+    if (!any) out += '(コメントを取得できませんでした)\n';
+    return out;
+  }
+  async function runQual(payload, onProgress) {
+    const v = await ensureViewer(); if (!v.ok) return v;
+    const handles = (payload.handles || []).slice(0, payload.target || 2);
+    const files = []; const stats = { ok: 0, err: 0, byErr: {} };
+    for (let i = 0; i < handles.length; i++) {
+      const h = String(handles[i]).replace(/^@/, '').trim(); if (!h) continue;
+      if (i > 0) await sleep(jitter(payload.minWait == null ? 4000 : payload.minWait, payload.maxWait == null ? 12000 : payload.maxWait));
+      onProgress({ phase: 'qual', i: i + 1, n: handles.length, handle: h });
+      try {
+        const res = await window.IGF.profile(h);
+        if (res.error) { stats.err++; stats.byErr[res.error] = (stats.byErr[res.error] || 0) + 1; if (res.error === 'rate_limited') { stats.stopped = 'rate_limited'; break; } continue; }
+        const prof = fullProfile(res); const posts = fullPosts(res); const pk = (posts[0] && posts[0].media_id) || '';
+        const top4 = [...posts].filter((p) => p.media_id && !p.comments_disabled).sort((a, b) => (b.like || 0) - (a.like || 0)).slice(0, 4);
+        const byPost = [];
+        for (const p of top4) { await sleep(jitter(1500, 3500)); byPost.push({ code: p.code, comments: await fetchComments(p.media_id) }); }
+        files.push({ name: h + '_captions.txt', text: buildCaptions(h, pk, posts) });
+        files.push({ name: h + '_profile.txt', text: buildProfile(h, prof) });
+        files.push({ name: h + '_comments.txt', text: buildComments(h, byPost) });
+        stats.ok++;
+      } catch (e) { stats.err++; stats.byErr.exception = (stats.byErr.exception || 0) + 1; }
+    }
+    stats.viewer = v.viewer.username || v.viewer.viewer_id; stats.handles = handles.length;
+    return { ok: true, qualFiles: files, firstHandle: (handles[0] || '').replace(/^@/, ''), stats, runTag: 'qual' };
+  }
+
   async function runDiscover(payload, onProgress) {
     const v = await ensureViewer(); if (!v.ok) return v;
     const tags = payload.tags || [];              // [{tag, life}]
@@ -167,24 +300,31 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!msg || (msg.type !== 'IGF_COLLECT' && msg.type !== 'IGF_DISCOVER')) return;
+    if (!msg || (msg.type !== 'IGF_COLLECT' && msg.type !== 'IGF_DISCOVER' && msg.type !== 'IGF_QUAL')) return;
     const onProgress = (p) => {
       try { chrome.runtime.sendMessage({ type: 'IGF_PROGRESS', p }); } catch (e) { /* popup閉 */ }
       if (p.phase === 'discover') setBanner(`発掘中 ${p.i}/${p.n}（候補 ${p.found}）`);
       else if (p.phase === 'discover_done') setBanner(`発掘完了：取得対象 ${p.picked}件。取得を開始…`);
       else if (p.phase === 'collect') setBanner(`取得中 ${p.i}/${p.n}｜@${p.handle}${p.err ? ' NG' : ''}`);
+      else if (p.phase === 'qual') setBanner(`精査データ収集 ${p.i}/${p.n}｜@${p.handle}`);
     };
     setBanner('開始しています…');
     (async () => {
       try {
-        const result = msg.type === 'IGF_DISCOVER'
-          ? await runDiscover(msg.payload || {}, onProgress)
+        const result = msg.type === 'IGF_QUAL' ? await runQual(msg.payload || {}, onProgress)
+          : msg.type === 'IGF_DISCOVER' ? await runDiscover(msg.payload || {}, onProgress)
           : await runCollect(msg.payload || {}, onProgress);
         if (result && result.ok) {
           const s = result.stats || {};
-          setBanner(`完了 ✓ OK ${s.ok} / NG ${s.err}${s.stopped ? '（' + s.stopped + 'で中断）' : ''}\n→ ダウンロード＆ダッシュボード反映`, s.stopped ? 'error' : 'done');
-          clearBanner(9000);
-          try { chrome.runtime.sendMessage({ type: 'IGF_DONE_DOWNLOAD', jsonl: result.jsonl, runTag: result.runTag, stats: result.stats }); } catch (e) { /* noop */ }
+          if (msg.type === 'IGF_QUAL') {
+            setBanner(`精査データ完了 ✓ ${s.ok}名分（NG ${s.err}）${s.stopped ? '（中断）' : ''}\n→ 保存＆精査画面へ`, s.stopped ? 'error' : 'done');
+            clearBanner(9000);
+            try { chrome.runtime.sendMessage({ type: 'IGF_QUAL_DONE', files: result.qualFiles, firstHandle: result.firstHandle, stats: result.stats }); } catch (e) { /* noop */ }
+          } else {
+            setBanner(`完了 ✓ OK ${s.ok} / NG ${s.err}${s.stopped ? '（' + s.stopped + 'で中断）' : ''}\n→ ダウンロード＆ダッシュボード反映`, s.stopped ? 'error' : 'done');
+            clearBanner(9000);
+            try { chrome.runtime.sendMessage({ type: 'IGF_DONE_DOWNLOAD', jsonl: result.jsonl, runTag: result.runTag, stats: result.stats }); } catch (e) { /* noop */ }
+          }
         } else {
           setBanner('失敗: ' + ((result && result.error) || '不明'), 'error'); clearBanner(12000);
         }

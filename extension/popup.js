@@ -31,6 +31,7 @@ function bindProgress(barId, statusId) {
     if (p.phase === 'discover') { $(statusId).textContent = `発掘中 [${p.i}/${p.n}] ${p.handle}（候補 ${p.found}）`; setBar(p.i, p.n); }
     else if (p.phase === 'discover_done') { $(statusId).textContent = `発掘完了：候補${p.discovered} / 新規${p.fresh} / 取得対象${p.picked}。取得を開始します…`; setBar(0, 1); }
     else if (p.phase === 'collect') { $(statusId).textContent = `取得中 [${p.i}/${p.n}] ${p.handle} ${p.err ? 'NG(' + p.err + ')' : 'OK'}`; setBar(p.i, p.n); }
+    else if (p.phase === 'qual') { $(statusId).textContent = `精査データ収集中 [${p.i}/${p.n}] @${p.handle}`; setBar(p.i, p.n); }
   };
   chrome.runtime.onMessage.addListener(onMsg);
   return () => chrome.runtime.onMessage.removeListener(onMsg);
@@ -51,8 +52,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   const el = document.querySelector('.pane.on #status, .pane.on #dstatus') || document.getElementById('dstatus');
   if (!el) return;
   el.textContent += (msg.result && msg.result.done)
-    ? '\n✔ ダッシュボードに自動反映しました（分析画面をご確認ください）'
-    : '\n（ダッシュボードが開いていないため未反映。保存したjsonlを「取得結果のドロップ」に入れてください）';
+    ? (msg.qual ? '\n✔ 先頭の1名を精査画面に自動反映しました（残りは Downloads から順にドロップ）' : '\n✔ ダッシュボードに自動反映しました（分析画面をご確認ください）')
+    : (msg.qual ? '\n（ダッシュボード未オープンのため未反映。保存した3ファイルを精査画面にドロップしてください）' : '\n（ダッシュボードが開いていないため未反映。保存したjsonlを「取得結果のドロップ」に入れてください）');
 });
 
 /* ---------------- ② プールから取得 ---------------- */
@@ -124,6 +125,41 @@ async function runDiscover() {
   finally { $('btnDiscover').disabled = false; }
 }
 
+/* ---------------- ③ 精査データ収集 ---------------- */
+function parseQHandles() {
+  return $('qhandles').value.split(/\r?\n/).map((l) => l.trim().replace(/^@/, '')).filter(Boolean);
+}
+function refreshQual() { $('btnQual').disabled = parseQHandles().length === 0; }
+async function reloadQualHandles() {
+  const r = await readDashboard('castnext_cdp_qual');
+  if (r.error || !r.raw) { $('qstatus').textContent = r.error || 'ダッシュボードに精査待ちがありません。分析→精査待ちが並ぶ状態で開いてください。'; return; }
+  try {
+    const cfg = JSON.parse(r.raw);
+    $('qhandles').value = (cfg.handles || []).map((h) => '@' + h).join('\n');
+    $('qstatus').textContent = `精査待ち ${(cfg.handles || []).length}名を取り込みました（上から人数分を集めます）。`;
+  } catch { $('qstatus').textContent = '精査待ちの読取に失敗しました。'; }
+  refreshQual();
+}
+async function runQual() {
+  const handles = parseQHandles();
+  if (!handles.length) { $('qstatus').textContent = '対象ハンドルを入れてください。'; return; }
+  const target = Number($('qtarget').value) || 2;
+  const ig = await ensureIgTab();
+  $('btnQual').disabled = true; $('qstatus').textContent = `${Math.min(target, handles.length)}名分の精査データ収集を開始…`;
+  const unbind = bindProgress('qbarFill', 'qstatus');
+  try {
+    const result = await chrome.tabs.sendMessage(ig.id, { type: 'IGF_QUAL', payload: { handles, target } });
+    unbind();
+    if (!result || !result.ok) $('qstatus').textContent = '失敗: ' + ((result && result.error) || '不明');
+    else {
+      const s = result.stats || {};
+      $('qstatus').textContent = `精査データ完了：${s.ok}名分（NG ${s.err}）${s.stopped ? '（中断）' : ''}\n`
+        + `→ 3ファイル×${s.ok}名を Downloads/casting-next/qual/ に保存。先頭は精査画面へ自動反映します…`;
+    }
+  } catch (e) { unbind(); $('qstatus').textContent = 'タブ送信に失敗: ' + (e && e.message) + '\ninstagram.com のタブを再読込して再実行してください。'; }
+  finally { $('btnQual').disabled = false; }
+}
+
 /* ---------------- タブ切替・初期化 ---------------- */
 document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === t));
@@ -134,6 +170,9 @@ $('btnRun').onclick = runPool;
 $('manual').oninput = refreshRun;
 $('btnDReload').onclick = reloadDiscoverTags;
 $('btnDiscover').onclick = runDiscover;
+$('btnQReload').onclick = reloadQualHandles;
+$('btnQual').onclick = runQual;
+$('qhandles').oninput = refreshQual;
 // タグ・目標件数はブラウザに保存して、次に開いたとき復元する（都度入力しなくてよい）
 $('dtags').oninput = () => { refreshDiscover(); try { chrome.storage.local.set({ dtags: $('dtags').value }); } catch (e) {} };
 $('dtarget').oninput = () => { refreshDiscover(); try { chrome.storage.local.set({ dtarget: $('dtarget').value }); } catch (e) {} };
@@ -146,3 +185,4 @@ try {
 } catch (e) { /* noop */ }
 reloadQueue();
 refreshDiscover();
+refreshQual();

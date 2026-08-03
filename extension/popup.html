@@ -37,8 +37,9 @@
     <p>Claude非経由・取得のみ（DM/フォロー/いいねはしません）</p>
   </header>
   <div class="tabs">
-    <div class="tab on" data-pane="pool">② プールから取得</div>
-    <div class="tab" data-pane="discover">① 発掘して収集</div>
+    <div class="tab on" data-pane="pool">② 取得</div>
+    <div class="tab" data-pane="discover">① 発掘</div>
+    <div class="tab" data-pane="qual">③ 精査データ</div>
   </div>
   <main>
     <!-- ② プールから取得 -->
@@ -66,6 +67,21 @@
       </div>
       <div class="row"><button id="btnDiscover" class="btn" disabled>発掘して収集</button><div class="bar"><i id="dbarFill"></i></div></div>
       <div id="dstatus">タグを入れて「発掘して収集」。取得済みは自動で除外します。</div>
+    </div>
+
+    <!-- ③ 精査データ収集 -->
+    <div class="pane" id="pane-qual">
+      <div class="row hint">精査待ちの上位アカウントの「キャプション全文・コメント欄・bio全文」を集めます（Claude非経由）。最終判断は人が行います。</div>
+      <div class="row">
+        <label class="k">対象ハンドル（1行1件・空なら下のボタンで取り込み）</label>
+        <textarea id="qhandles" placeholder="@fujimotosubaru&#10;@mikajimbox"></textarea>
+      </div>
+      <div class="row">
+        <label class="k">人数（1回2名までを推奨） <input class="num" id="qtarget" type="number" value="2" /></label>
+        <button id="btnQReload" class="btn ghost" style="margin-top:6px">ダッシュボードの精査待ちを取り込む</button>
+      </div>
+      <div class="row"><button id="btnQual" class="btn" disabled>精査データを集める</button><div class="bar"><i id="qbarFill"></i></div></div>
+      <div id="qstatus">対象を入れて「精査データを集める」。先頭の1名は精査画面へ自動で入ります。</div>
     </div>
   </main>
   <script src="popup.js"></script>

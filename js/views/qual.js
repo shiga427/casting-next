@@ -156,7 +156,18 @@ function copyText(text, msg) {
   else fallback();
 }
 
+/* 拡張の「③精査データ収集」向けに、精査待ちハンドル（得点率順）を localStorage に出す。 */
+function exportCdpQual() {
+  try {
+    localStorage.setItem("castnext_cdp_qual", JSON.stringify({
+      handles: targets().map(c => String(c.username || "").replace(/^@/, "")).filter(Boolean),
+      at: new Date().toISOString(),
+    }));
+  } catch (e) { /* localStorage 不可なら黙ってスキップ */ }
+}
+
 export function mount() {
+  exportCdpQual();
   const qreq = document.getElementById("btnQualReq");
   if (qreq) qreq.onclick = makeQualRequest;
   const drop = document.getElementById("dropQual"), file = document.getElementById("fileQual");
