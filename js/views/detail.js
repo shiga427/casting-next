@@ -16,6 +16,7 @@ import {
   LEGACY_S2_KEYS, LEGACY_S2_LAB, TIER_LAB, T3_SAMPLE
 } from "../pipeline/conf.js";
 import { numOrNull, todayISO, splitKw } from "../pipeline/util.js";
+import { toMarkdown } from "../pipeline/qualReport.js";
 
 let current = null;
 
@@ -85,6 +86,9 @@ function html(c) {
         <dt>語りの向き</dt><dd>${esc(c.qualStance || "—")}</dd>
       </dl>
       <div id="mNg">${ngHit(c)}</div>
+
+      <h4>精査結果(定性評価)</h4>
+      ${qualBlock(c)}
 
       <h4>SBIS-1 内訳(自動)</h4>
       <div class="breakdown">
@@ -224,6 +228,24 @@ function ngHit(c) {
   const ngs = splitKw(state.conf.ngWords).filter(w => ((c.bio || "") + (c.notes || "")).includes(w));
   return ngs.length ? `<div class="ng-hit">⚠ NGワード検出:${ngs.map(esc).join("、")}(bio/メモ内 — 投稿本文も要確認)</div>` : "";
 }
+/* 精査結果(定性評価)。候補ボードの「精査」列 → 行クリック → ここで結論の全文が読める、という導線。
+ * 人が書いた結論(役割・魅力・懸念)を出すのが要点。証拠の全文は md 書き出しで見る */
+function qualBlock(c) {
+  const q = c.qualReport;
+  if (!q) return `<div class="hint">未精査(「精査・定性評価」タブで実施します)</div>`;
+  const day = String(q.doneAt || q.generatedAt || "").slice(0, 10);  /* doneAt が無い既存レポートは生成日で代替 */
+  const h = q.human || {};
+  const row = (lab, v) => `<div class="r"><span>${esc(lab)}</span><b>${esc(v || "—")}</b></div>`;
+  return `<div class="breakdown">
+    <div class="r"><span>状態</span><b>${q.done ? `<span class="tag g">精査済</span>` : `<span class="tag res">下書き</span>`} ${esc(day)}</b></div>
+    ${row("語りの向き", c.qualStance || (q.stance && q.stance.verdict))}
+    ${row("戦略での役割", h.role)}
+    ${row("魅力", h.charm)}
+    ${row("懸念", h.concern)}
+  </div>
+  <div class="toolrow"><button class="btn ghost sm" id="mQualMd">mdで書き出す</button>
+    <span class="hint">引用・コメントのQ&Aを含む全文は md に出ます</span></div>`;
+}
 function t1Text(a, c) {
   if (!a) return "";
   const rt = a.ratio == null ? "—" : (a.ratio * 100).toFixed(1) + "%";
@@ -356,6 +378,13 @@ function bind(c) {
   const $ = id => document.getElementById(id);
   $("mClose").onclick = close;
   $("mSave").onclick = () => { const b = save(); if (b && b.length) { toast("証拠メモが未記入の項目があります", true); return; } close(); };
+  const qmd = $("mQualMd");
+  if (qmd) qmd.onclick = () => {
+    const blob = new Blob([toMarkdown(c.qualReport)], { type: "text/markdown" });
+    const a2 = document.createElement("a");
+    a2.href = URL.createObjectURL(blob); a2.download = `定性評価_${c.qualReport.handle}.md`; a2.click();
+    setTimeout(() => URL.revokeObjectURL(a2.href), 5000);
+  };
   $("mDelete").onclick = () => {
     if (!confirm(`@${c.username} を候補から削除します。よろしいですか?`)) return;
     state.cands = state.cands.filter(x => x.username !== current);

@@ -193,6 +193,9 @@ export function mount() {
   if (done) done.onclick = () => {
     if (!isComplete(draft.report)) { toast("人が書く欄を全部埋めてください(空欄のまま提出しない)", true); return; }
     draft.report.done = true;
+    /* 「いつ精査したか」の確定時刻。generatedAt は下書きを作った時刻なので別に持つ(候補ボードの精査列で使う)。
+     * 下書き保存では触らない = 完了にした瞬間だけ立つ */
+    draft.report.doneAt = new Date().toISOString();
     saveReport();
     toast(`@${draft.report.handle} の定性評価を保存しました`);
     rerender();

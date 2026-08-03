@@ -83,6 +83,10 @@ th { background: #FBF7F2; color: var(--sub); font-weight: 700; text-align: left;
 td { padding: 8px 10px; border-bottom: 1px solid #F3EDE6; vertical-align: top; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.click:hover { background: #FBF3EE; cursor: pointer; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { background: #F3E7DC; color: var(--brand-700); }
+th.sortable.on { color: var(--brand-700); }
+th .arw { font-size: 10px; margin-left: 2px; }
 .handle { color: var(--brand-700); font-weight: 700; }
 .tblwrap { overflow-x: auto; }
 
