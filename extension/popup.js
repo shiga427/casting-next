@@ -126,34 +126,113 @@ async function runDiscover() {
 }
 
 /* ---------------- ③ 精査データ収集 ---------------- */
+/* 精査対象は「スコア○点以上」。10名に満たなければ発掘→自動反映→再判定を回して補充する。
+ * 判断に使う数値の正本はダッシュボード側 js/pipeline/conf.js（castnext_cdp_qual に載って来る）。
+ * ここのフォールバックは、ダッシュボードが読めなかったときだけ使う保険。 */
+const QUAL_FALLBACK = { maxCollect: 12, maxRounds: 3, minScore: 60, fillTarget: 10 };
+const QUAL_WAIT_MS = 30000;   // 発掘→ダッシュボード自動反映の待ち上限
+const QUAL_POLL_MS = 2000;
+let qualCfg = null;           // 最後に読んだ castnext_cdp_qual
+
 function parseQHandles() {
   return $('qhandles').value.split(/\r?\n/).map((l) => l.trim().replace(/^@/, '')).filter(Boolean);
 }
-function refreshQual() { $('btnQual').disabled = parseQHandles().length === 0; }
-async function reloadQualHandles() {
+function refreshQual() { $('btnQual').disabled = false; } // 空欄なら精査待ちを取り込むので常に押せる
+async function readQualCfg() {
   const r = await readDashboard('castnext_cdp_qual');
-  if (r.error || !r.raw) { $('qstatus').textContent = r.error || 'ダッシュボードに精査待ちがありません。分析→精査待ちが並ぶ状態で開いてください。'; return; }
-  try {
-    const cfg = JSON.parse(r.raw);
-    $('qhandles').value = (cfg.handles || []).map((h) => '@' + h).join('\n');
-    $('qstatus').textContent = `精査待ち ${(cfg.handles || []).length}名を取り込みました（上から人数分を集めます）。`;
-  } catch { $('qstatus').textContent = '精査待ちの読取に失敗しました。'; }
+  if (r.error || !r.raw) return { error: r.error || 'ダッシュボードに精査待ちがありません。casting-next を開いてください。' };
+  try { return { cfg: JSON.parse(r.raw) }; } catch { return { error: '精査待ちの読取に失敗しました。' }; }
+}
+function qualLine(cfg) {
+  const n = (cfg.eligible == null ? (cfg.handles || []).length : cfg.eligible);
+  const deferred = cfg.deferred || 0;
+  return `${cfg.minScore || QUAL_FALLBACK.minScore}点以上 ${n}件`
+    + (deferred > 0 ? `（今回 ${(cfg.handles || []).length}件 / 残り ${deferred}件は次回）` : '')
+    + ((cfg.shortfall || 0) > 0 ? `（${cfg.fillTarget || QUAL_FALLBACK.fillTarget}件に ${cfg.shortfall}件不足）` : '');
+}
+async function reloadQualHandles() {
+  const r = await readQualCfg();
+  if (r.error) { $('qstatus').textContent = r.error; return; }
+  qualCfg = r.cfg;
+  $('qhandles').value = (qualCfg.handles || []).map((h) => '@' + h).join('\n');
+  $('qstatus').textContent = `精査待ちを取り込みました：${qualLine(qualCfg)}`;
   refreshQual();
 }
+/* 発掘の結果がダッシュボードにマージされ、castnext_cdp_qual が更新されるのを待つ */
+async function waitQualUpdate(prevAt) {
+  const until = Date.now() + QUAL_WAIT_MS;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, QUAL_POLL_MS));
+    const r = await readQualCfg();
+    if (r.cfg && r.cfg.at && r.cfg.at !== prevAt) return r.cfg;
+  }
+  return null;
+}
 async function runQual() {
-  const handles = parseQHandles();
-  if (!handles.length) { $('qstatus').textContent = '対象ハンドルを入れてください。'; return; }
-  const target = Number($('qtarget').value) || 2;
+  const manual = parseQHandles();
+  const notes = [];
+  let cfg = qualCfg;
+  if (!manual.length) {
+    const r = await readQualCfg();
+    if (r.error) { $('qstatus').textContent = r.error; return; }
+    cfg = qualCfg = r.cfg;
+  }
+  const maxCollect = (cfg && cfg.maxCollect) || QUAL_FALLBACK.maxCollect;
+  let handles = manual.length ? manual : (cfg.handles || []);
   const ig = await ensureIgTab();
-  $('btnQual').disabled = true; $('qstatus').textContent = `${Math.min(target, handles.length)}名分の精査データ収集を開始…`;
+  $('btnQual').disabled = true;
   const unbind = bindProgress('qbarFill', 'qstatus');
   try {
-    const result = await chrome.tabs.sendMessage(ig.id, { type: 'IGF_QUAL', payload: { handles, target } });
+    /* 手入力でないときだけ、不足ぶんを発掘で埋める（手入力は本人の指定を尊重して発掘しない） */
+    if (!manual.length && (cfg.shortfall || 0) > 0 && cfg.discover && (cfg.discover.tags || []).length) {
+      const maxRounds = cfg.discover.maxRounds || QUAL_FALLBACK.maxRounds;
+      const startedWith = cfg.eligible || 0;
+      for (let round = 1; round <= maxRounds; round++) {
+        const shortfall = cfg.shortfall || 0;
+        if (shortfall <= 0) break;
+        const target = Math.max(shortfall * 4, 40);
+        const prevAt = cfg.at;
+        const prevEligible = cfg.eligible || 0;
+        $('qstatus').textContent = `${cfg.minScore}点以上が ${prevEligible}件（${cfg.fillTarget}件に不足）。`
+          + `\n発掘 ${round}/${maxRounds} 回目：新規${target}件を目標に集めます…`;
+        let dr = null;
+        try {
+          dr = await chrome.tabs.sendMessage(ig.id, {
+            type: 'IGF_DISCOVER',
+            payload: { tags: cfg.discover.tags, target, done: cfg.discover.done || [], runTag: 'disc' },
+          });
+        } catch (e) { notes.push(`発掘${round}回目のタブ送信に失敗（${e && e.message}）`); break; }
+        if (!dr || !dr.ok) { notes.push(`発掘${round}回目に失敗（${(dr && dr.error) || '不明'}）`); break; }
+        const ds = dr.stats || {};
+        const limited = ds.stopped === 'rate_limited';
+        $('qstatus').textContent = `発掘 ${round}/${maxRounds} 完了（取得${ds.ok || 0}件）。ダッシュボードへの反映を待っています…`;
+        const next = await waitQualUpdate(prevAt);
+        if (!next) { notes.push(`発掘${round}回目の反映を確認できませんでした（ダッシュボードが開いていない可能性）`); break; }
+        cfg = qualCfg = next;
+        if (limited) { notes.push(`発掘${round}回目でInstagramのレート制限に当たり中断`); break; }
+        if ((cfg.eligible || 0) <= prevEligible) { notes.push(`発掘${round}回目で基準到達の新規が増えませんでした`); break; }
+      }
+      const gained = (cfg.eligible || 0) - startedWith;
+      if (gained > 0) notes.push(`発掘で ${gained}件追加`);
+      handles = cfg.handles || [];
+    }
+    handles = handles.slice(0, maxCollect);   // 取りすぎ防止（残りは次回）
+    if (!handles.length) {
+      unbind();
+      $('qstatus').textContent = `対象が0件です。${(cfg && cfg.minScore) || QUAL_FALLBACK.minScore}点以上の候補がいません。`
+        + (notes.length ? '\n' + notes.join(' / ') : '');
+      return;
+    }
+    const head = manual.length ? `手入力 ${handles.length}名` : qualLine(cfg);
+    $('qstatus').textContent = `${head}\n${handles.length}名分の精査データ収集を開始…`;
+    const result = await chrome.tabs.sendMessage(ig.id, { type: 'IGF_QUAL', payload: { handles } });
     unbind();
     if (!result || !result.ok) $('qstatus').textContent = '失敗: ' + ((result && result.error) || '不明');
     else {
       const s = result.stats || {};
       $('qstatus').textContent = `精査データ完了：${s.ok}名分（NG ${s.err}）${s.stopped ? '（中断）' : ''}\n`
+        + (manual.length ? '' : qualLine(cfg) + '\n')
+        + (notes.length ? notes.join(' / ') + '\n' : '')
         + `→ 3ファイル×${s.ok}名を Downloads/casting-next/qual/ に保存。先頭は精査画面へ自動反映します…`;
     }
   } catch (e) { unbind(); $('qstatus').textContent = 'タブ送信に失敗: ' + (e && e.message) + '\ninstagram.com のタブを再読込して再実行してください。'; }

@@ -96,3 +96,12 @@ export const MANNER_RE = [
 
 /* v1.2:10万超は「対象外帯」ではなく「第0候補(保管)」(指示書§0) */
 export const TIER_LAB = { middle: "ミドル", micro: "マイクロ", mega: "第0候補", out: "対象外帯" };
+
+/* 精査(qual)対象の選び方(2026-08-03 変更)。
+ * 旧: 得点率の上位N名を機械的に取る → 母数が薄いと30点台まで精査に回っていた。
+ * 新: **スコア60点以上だけを対象**にし、10名に満たなければ発掘で母数を足す。
+ * ここは拡張(extension/popup.js)も参照する正本。数値を散らさずこの4つだけを見ること。 */
+export const QUAL_MIN_SCORE = 60;          /* 精査対象の下限(score.total)。これ未満は精査に回さない */
+export const QUAL_FILL_TARGET = 10;        /* 1回で揃えたい精査対象の人数。不足ぶんを発掘で埋める */
+export const QUAL_MAX_COLLECT = 12;        /* 1回の収集で拡張に渡す上限(超過ぶんは次回へ回す。黙って切り捨てない) */
+export const QUAL_DISCOVER_MAX_ROUNDS = 3; /* 不足時の自動発掘の最大周回。これを超えたら足りないまま続行して事実を言う */

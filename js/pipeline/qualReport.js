@@ -7,6 +7,7 @@
  */
 import * as Q from "./qualsignals.js";
 import { cpLen } from "./util.js";
+import { QUAL_MIN_SCORE } from "./conf.js";
 
 const POST_HEAD = /^\[(\d+)\]\s*(\S+)?\s*like=(\S+)\s*comment=(\S+)/m;
 const CMT_HEAD = /^---\s*#(\d+)\s+user=@(\S+)\s+own_reply=(YES|no)/gm;
@@ -120,12 +121,20 @@ export function buildReport({ captionsText, commentsText, profileText, handle })
   };
 }
 
-/* 精査待ちの上位N名(§5-6・§4-1c:優先順位付けは全候補共通で**得点率**)。
- * 足切り・対象外帯・第0候補(10万超)は精査対象にしない。精査済みも外す。 */
-export function qualTargets(cands, limit = 10) {
+/* 精査待ち(§5-6・§4-1c:並びは全候補共通で**得点率**降順)。
+ * 2026-08-03 変更: 「上位N名」ではなく **スコア QUAL_MIN_SCORE 点以上**を対象にする。
+ * 母数が薄いときに30点台まで精査に回っていたのを止めるため。人数の充足は発掘側(cdpQual.js)の役目。
+ * 足切り・対象外帯・第0候補(10万超)は精査対象にしない。精査済み・見送りも外す。
+ *
+ * opts: { minScore, limit }。数値を渡した場合は後方互換で limit 扱い(既存の呼び出し・テスト用)。 */
+export function qualTargets(cands, opts) {
+  const o = typeof opts === "number" ? { limit: opts } : (opts || {});
+  const minScore = o.minScore == null ? QUAL_MIN_SCORE : o.minScore;
+  const limit = o.limit == null ? Infinity : o.limit;
   return (cands || [])
     .filter(c => c.score && !c.score.cut && c.score.rate != null
       && c.score.tier !== "out" && c.score.tier !== "mega"
+      && c.score.total != null && Number(c.score.total) >= minScore
       && !(c.qualReport && c.qualReport.done)
       && c.status !== "見送り")
     .sort((a, b) => b.score.rate - a.score.rate)

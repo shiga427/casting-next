@@ -250,7 +250,8 @@
   }
   async function runQual(payload, onProgress) {
     const v = await ensureViewer(); if (!v.ok) return v;
-    const handles = (payload.handles || []).slice(0, payload.target || 2);
+    // 人数の上限はダッシュボード側(QUAL_MAX_COLLECT)と popup で決める。ここでは切らない
+    const handles = (payload.handles || []);
     const files = []; const stats = { ok: 0, err: 0, byErr: {} };
     for (let i = 0; i < handles.length; i++) {
       const h = String(handles[i]).replace(/^@/, '').trim(); if (!h) continue;

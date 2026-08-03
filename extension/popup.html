@@ -71,17 +71,17 @@
 
     <!-- ③ 精査データ収集 -->
     <div class="pane" id="pane-qual">
-      <div class="row hint">精査待ちの上位アカウントの「キャプション全文・コメント欄・bio全文」を集めます（Claude非経由）。最終判断は人が行います。</div>
+      <div class="row hint">スコア60点以上の候補の「キャプション全文・コメント欄・bio全文」を集めます（Claude非経由）。最終判断は人が行います。<br>
+        10件に満たなければ自動で発掘して補充します（DM・フォロー・いいねは一切しません）。</div>
       <div class="row">
-        <label class="k">対象ハンドル（1行1件・空なら下のボタンで取り込み）</label>
-        <textarea id="qhandles" placeholder="@fujimotosubaru&#10;@mikajimbox"></textarea>
+        <label class="k">対象ハンドル</label>
+        <textarea id="qhandles" placeholder="例）@handle を1行1件（空欄なら精査待ちを取り込む）"></textarea>
       </div>
       <div class="row">
-        <label class="k">人数（1回2名までを推奨） <input class="num" id="qtarget" type="number" value="2" /></label>
-        <button id="btnQReload" class="btn ghost" style="margin-top:6px">ダッシュボードの精査待ちを取り込む</button>
+        <button id="btnQReload" class="btn ghost">ダッシュボードの精査待ちを取り込む</button>
       </div>
-      <div class="row"><button id="btnQual" class="btn" disabled>精査データを集める</button><div class="bar"><i id="qbarFill"></i></div></div>
-      <div id="qstatus">対象を入れて「精査データを集める」。先頭の1名は精査画面へ自動で入ります。</div>
+      <div class="row"><button id="btnQual" class="btn">精査データを集める</button><div class="bar"><i id="qbarFill"></i></div></div>
+      <div id="qstatus">そのまま「精査データを集める」で、60点以上の対象を自動で取り込みます。先頭の1名は精査画面へ自動で入ります。</div>
     </div>
   </main>
   <script src="popup.js"></script>

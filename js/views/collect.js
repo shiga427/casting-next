@@ -20,6 +20,7 @@ import { EXT_COLUMNS, rowsToCsv } from "../pipeline/export.js";
 import { buildQueue, readDoneHandles } from "../pipeline/rankQueue.js";
 import { csvToObjects } from "../pipeline/util.js";
 import { absorbRun, discoveryTags } from "../pipeline/discovery.js";
+import { cdpQualSummary, exportCdpQual } from "../pipeline/cdpQual.js";
 
 const PREP = [
   ["chrome", "Chrome を使っている(収集には Chrome 拡張が必要です)"],
@@ -442,12 +443,21 @@ function handleJsonl(text, name) {
   const csv = rowsToCsv(run.rows.filter(r => r.verdict === "passed").map(rowFromRun), EXT_COLUMNS);
   const res = importCandidateCsv(csv, state.cands, { runTag });
   rescoreAll(state.cands, state.conf);
+  /* ★マージ→60点以上の再判定は「ここ」が唯一のフック。
+   * 発掘で足した候補が基準に届いたかを再採点直後に拡張へ返す(拡張はこれを見て発掘を続けるか決める)。 */
+  const cdp = exportCdpQual(state.cands, {
+    tags: (state.queue && state.queue.tags) || [],
+    done: [...doneSet()],
+  });
   markDirty();
+  const qualNote = ` / 精査対象:${cdpQualSummary(cdp)}`;
   const tagNote = absorbed.tags.length
     ? ` / タグ別:${absorbed.tags.slice(0, 3).map(t => `${t.tag} ${t.fetched}件`).join("・")}`
     : "";
   toast(`${runTag} を解析しました(機械合格 ${run.machinePassed}名 / 候補ボードへ ${res.added}件追加`
-    + `${absorbed.addedToPool ? ` / プールに ${absorbed.addedToPool}件` : ""}${tagNote})`);
+    + `${absorbed.addedToPool ? ` / プールに ${absorbed.addedToPool}件` : ""}${tagNote}${qualNote})`);
+  const logEl = document.getElementById("log");
+  if (logEl) logEl.innerHTML = esc(`${runTag}: 精査対象 ${cdpQualSummary(cdp)}`);
   go("analysis");
 }
 function rowFromRun(r) {

@@ -7,6 +7,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { qualTargets, parseCaptions, parseComments, parseProfile } from "../js/pipeline/qualReport.js";
+import { buildCdpQual, cdpQualSummary } from "../js/pipeline/cdpQual.js";
+import {
+  QUAL_DISCOVER_MAX_ROUNDS, QUAL_FILL_TARGET, QUAL_MAX_COLLECT, QUAL_MIN_SCORE,
+} from "../js/pipeline/conf.js";
 import { newCand } from "../js/pipeline/schema.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -96,19 +100,46 @@ test("依頼文の書式サンプルが、精査画面のパーサでそのま�
   assert.ok(!prof.bio.includes("example.com"), "bio_links を bio と誤認している");
 });
 
-test("依頼の対象は得点率の高い順・上限10名。足切りと精査済みは外す", () => {
+test("依頼の対象はスコア60点以上・得点率の高い順。足切りと精査済みは外す", () => {
   const cands = [
     cand("low", 30), cand("high", 90), cand("mid", 60),
-    cand("cutoff", 95, { score: { rate: 95, cut: true, tier: "micro", mode: "full" } }),
-    cand("mega", 99, { score: { rate: 99, cut: false, tier: "mega", mode: "full" } }),
-    cand("out", 98, { score: { rate: 98, cut: false, tier: "out", mode: "full" } }),
+    cand("under", 59),
+    cand("cutoff", 95, { score: { rate: 95, total: 95, max: 100, cut: true, tier: "micro", mode: "full" } }),
+    cand("mega", 99, { score: { rate: 99, total: 99, max: 100, cut: false, tier: "mega", mode: "full" } }),
+    cand("out", 98, { score: { rate: 98, total: 98, max: 100, cut: false, tier: "out", mode: "full" } }),
     cand("done", 80, { qualReport: { done: true } }),
     cand("dropped", 85, { status: "見送り" }),
   ];
-  const got = qualTargets(cands, 10).map(c => c.username);
-  assert.deepEqual(got, ["high", "mid", "low"]);
-  /* 上限が効く */
-  const many = Array.from({ length: 25 }, (_, i) => cand("u" + i, 100 - i));
+  /* 60点未満(low/under)は精査に回さない。上位N名ではなく閾値で切る */
+  assert.deepEqual(qualTargets(cands).map(c => c.username), ["high", "mid"]);
+  /* 閾値は引数で上書きできる(既定は QUAL_MIN_SCORE) */
+  assert.deepEqual(qualTargets(cands, { minScore: 0 }).map(c => c.username), ["high", "mid", "under", "low"]);
+  /* 60点以上が何人いても件数では切らない(渡す人数の上限は cdpQual 側の役目) */
+  const many = Array.from({ length: 25 }, (_, i) => cand("u" + i, 100 - i * 2)); /* 100,98,…,52点 */
+  assert.equal(qualTargets(many).length, 21);   /* 100〜80点の21人 */
+  assert.equal(qualTargets(many)[0].username, "u0");
+  /* 数値を渡したときは後方互換で limit 扱い */
   assert.equal(qualTargets(many, 10).length, 10);
-  assert.equal(qualTargets(many, 10)[0].username, "u0");
+});
+
+test("精査指示(castnext_cdp_qual)に不足人数と発掘プランが入る", () => {
+  const three = [cand("a", 90), cand("b", 80), cand("c", 70)];
+  const p = buildCdpQual(three, { at: "2026-08-03T00:00:00.000Z" });
+  assert.equal(p.minScore, QUAL_MIN_SCORE);
+  assert.equal(p.fillTarget, QUAL_FILL_TARGET);
+  assert.equal(p.eligible, 3);
+  assert.deepEqual(p.handles, ["a", "b", "c"]);
+  assert.equal(p.shortfall, QUAL_FILL_TARGET - 3, "不足人数が出ていない");
+  assert.ok(p.discover.tags.length, "発掘プランのタグが空");
+  assert.ok(p.discover.tags.every(t => t.tag.startsWith("#")), "タグが#始まりでない");
+  assert.equal(p.discover.maxRounds, QUAL_DISCOVER_MAX_ROUNDS);
+
+  /* 上限を超えたぶんは「次回」に回す。黙って捨てない */
+  const many = Array.from({ length: 25 }, (_, i) => cand("u" + i, 100 - i * 2)); /* 100,98,…,52点 */
+  const q = buildCdpQual(many, { at: "2026-08-03T00:00:00.000Z" });
+  assert.equal(q.handles.length, QUAL_MAX_COLLECT);
+  assert.equal(q.eligible, 21);
+  assert.equal(q.deferred, 21 - QUAL_MAX_COLLECT);
+  assert.equal(q.shortfall, 0);
+  assert.ok(cdpQualSummary(q).includes("残り " + (21 - QUAL_MAX_COLLECT) + "件"), "切り捨てぶんを言っていない");
 });
