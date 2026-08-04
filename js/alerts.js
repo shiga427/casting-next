@@ -30,9 +30,10 @@ export function buildAlerts(ctx) {
     const hold = (run.reliability.stanceBreakdown || {})["判定保留"] || 0;
     add({
       id: "A2", level: "warn", title: "この取得、定性判定が実力より低く出ています…",
-      body: `${run.runTag} はキャプション平均 <b>${run.reliability.avgCaptionLen}字</b>(基準140字)で取得されており、`
-        + `定性列とPR件数が過小です。機械合格${run.machinePassed}名中 <b>${hold}名が「判定保留」</b>になっています。`,
-      go: "→ 収集画面でプローブ設定(__CAP=140)を確認して再取得", to: "collect"
+      body: `${run.runTag} はキャプション平均 <b>${run.reliability.avgCaptionLen}字</b>で取得されており、`
+        + `定性列とPR件数が過小です。機械合格${run.machinePassed}名中 <b>${hold}名が「判定保留」</b>になっています。`
+        + `（判定の目安は140字。現行の拡張はキャプション全文を取るので、これは<b>旧取得データ</b>で起きる症状です）`,
+      go: "→ 収集画面から拡張で再取得", to: "collect"
     });
   }
 

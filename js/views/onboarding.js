@@ -29,8 +29,8 @@ function stepProject() {
 function stepPrep() {
   const prep = (state.queue && state.queue.prep) || {};
   const items = [
-    ["chrome", "Chrome を使っている", "収集には Claude の Chrome 拡張が必要です"],
-    ["ext", "Claude の Chrome 拡張が入っていて、instagram.com でサイト権限が有効", "拡張のオプションからサイト権限を許可してください"],
+    ["chrome", "Chrome を使っている", "収集には Casting Next 拡張(Chrome 拡張)が必要です"],
+    ["ext", "Casting Next 拡張が入っていて、instagram.com でサイト権限が有効", "chrome://extensions でデベロッパーモードを有効にし、リポジトリの extension/ フォルダを「パッケージ化されていない拡張機能を読み込む」で入れてください"],
     ["login", "instagram.com にご自身のアカウントでログインしている", "ページ内 fetch に Cookie が必要です"],
   ];
   return `<h3>② 準備チェック(自己申告)</h3>
@@ -51,8 +51,15 @@ function stepSample() {
 }
 function stepGo() {
   return `<h3>④ 最初の収集へ</h3>
-    <p class="hint">収集画面で「キューを作る」→「依頼文を作ってコピー」を押し、コピーした文章を
-      あなたの Claude に貼り付けてください。手順・禁止事項・ペース・中断条件はすべて依頼文に入っています。</p>
+    <p class="hint">収集は <b>Casting Next 拡張</b>が行います。次の順で進めてください。</p>
+    <ol class="hint" style="margin:8px 0 0 18px;line-height:1.9">
+      <li>chrome://extensions で「デベロッパーモード」→「パッケージ化されていない拡張機能を読み込む」→ <code>extension/</code> を選ぶ</li>
+      <li>instagram.com をご自身のアカウントで開いてログインしておく</li>
+      <li>収集画面（①発掘から始める）でタグを選び、<b>拡張ポップアップの「①発掘して収集」</b>を押す</li>
+      <li>集め終わると<b>この画面に結果が自動で入り</b>、そのまま分析結果に切り替わります</li>
+    </ol>
+    <div class="note" style="margin-top:8px">間隔・件数上限・429での中断は拡張が守ります。
+      DM送信・フォロー・いいね・投稿は一切しません。</div>
     <div class="toolrow" style="margin-top:12px">
       <button class="btn" id="wGoCollect">収集画面へ</button>
       <button class="btn ghost sm" id="wGoDash">概要へ</button>

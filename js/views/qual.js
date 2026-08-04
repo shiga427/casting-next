@@ -11,15 +11,24 @@ import { state, markDirty } from "../store.js";
 import { esc } from "../charts.js";
 import { toast } from "../app.js";
 import { buildReport, HUMAN_FIELDS, isComplete, toMarkdown, qualTargets } from "../pipeline/qualReport.js";
-import { buildCdpQual, cdpQualSummary, exportCdpQual } from "../pipeline/cdpQual.js";
+import { buildCdpQual, CDP_QUAL_KEY, cdpQualSummary, exportCdpQual } from "../pipeline/cdpQual.js";
 import { QUAL_MAX_COLLECT, QUAL_MIN_SCORE } from "../pipeline/conf.js";
 
-const REQUEST_LIMIT = QUAL_MAX_COLLECT;   /* 依頼文1本にまとめる人数の上限(依頼文の長さの都合。精査人数の上限ではない) */
 let draft = { handle: "", captionsText: "", commentsText: "", profileText: "", report: null };
 
 function targets() {
   /* 対象 = スコア QUAL_MIN_SCORE 点以上(得点率の高い順)。収集対象も精査対象もこれ1つ */
   return qualTargets(state.cands);
+}
+/* 拡張へ最後に渡した時刻。渡っているかを拡張を開かずに目視するため */
+function lastSentAt() {
+  try {
+    const at = JSON.parse(localStorage.getItem(CDP_QUAL_KEY) || "{}").at;
+    if (!at) return "";
+    const d = new Date(at);
+    if (isNaN(d)) return "";
+    return `最終送信 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  } catch (e) { return ""; }
 }
 function doneCount() {
   return state.cands.filter(c => c.qualReport && c.qualReport.done).length;
@@ -37,22 +46,26 @@ export function render() {
   <div class="cols">
     <div>
       <div class="card">
-        <h3>⓪ 精査データを集めてもらう<span class="r">${Math.min(REQUEST_LIMIT, list.length)}名ぶんをまとめて依頼</span></h3>
+        <h3>⓪ 精査データを集める<span class="r">拡張が集めます</span></h3>
         <p class="hint">精査には「キャプション全文・コメント欄・bio全文」が要ります(取得時の140字では足りません)。
-          <b>${esc(cdpQualSummary(cdp))}</b><br>
-          この依頼文に載るのは<b>現在の${QUAL_MIN_SCORE}点以上だけ</b>です(不足分の自動発掘は拡張③の経路でのみ動きます)。</p>
-        <div class="toolrow">
-          <button class="btn" id="btnQualReq" ${list.length ? "" : "disabled"}>精査データ依頼文を作ってコピー</button>
-          <span class="hint">${list.length ? `対象:${list.slice(0, REQUEST_LIMIT).map(c => "@" + esc(c.username)).join("、")}` : `${QUAL_MIN_SCORE}点以上の候補がいません（発掘で母数を足してください）`}</span>
+          <b>${esc(cdpQualSummary(cdp))}</b></p>
+        <div class="sendbox">
+          <b>拡張に渡す準備</b>
+          <div class="hint">${list.length
+            ? `対象:${list.slice(0, QUAL_MAX_COLLECT).map(c => "@" + esc(c.username)).join("、")}`
+            : `${QUAL_MIN_SCORE}点以上の候補がいません（拡張③が自動で発掘して補充します）`}</div>
+          <div class="hint">→ <b>拡張ポップアップの「③精査データ」</b>で「ダッシュボードの精査待ちを取り込む」→「精査データを集める」
+            （このページは開いたままに）。集め終わると下の①へ自動で入ります</div>
+          <div class="hint sent" id="qSent">${esc(lastSentAt())}</div>
         </div>
-        <textarea id="qualReqText" rows="8" placeholder="ボタンを押すとここに出ます(コピー済み)"></textarea>
       </div>
 
       <div class="card">
-        <h3>① 精査データ(3ファイル)をドロップ<span class="r">captions / comments / profile</span></h3>
+        <h3>① 精査データの取り込み<span class="r">拡張から自動で入ります</span></h3>
         <div class="drop" id="dropQual">
-          <b>&lt;handle&gt;_captions.txt</b> / <b>_comments.txt</b> / <b>_profile.txt</b> をまとめてドロップ<br>
-          <span class="hint">形式は依頼文の「精査データの収集」で指定したもの。ファイル名からハンドルを読みます。</span>
+          <b>拡張が集め終わるとここに自動で入ります。</b>手動でドロップすることもできます<br>
+          <span class="hint">手動のときは <b>&lt;handle&gt;_captions.txt</b> / <b>_comments.txt</b> / <b>_profile.txt</b> をまとめて。
+            ファイル名からハンドルを読みます。</span>
           <input type="file" id="fileQual" accept=".txt,.md" multiple style="display:none">
         </div>
         <div class="hint" id="qLog">${draft.handle ? `対象:@${esc(draft.handle)} / captions ${draft.captionsText ? "✓" : "—"} comments ${draft.commentsText ? "✓" : "—"} profile ${draft.profileText ? "✓" : "—"}` : ""}</div>
@@ -123,52 +136,10 @@ function reportCard(r) {
   </div>`;
 }
 
-/* 精査データ収集の依頼文(§8-3 の精査データ収集節を上位N名で埋めたもの) */
-async function makeQualRequest() {
-  const list = targets().slice(0, REQUEST_LIMIT);
-  if (!list.length) { toast(`${QUAL_MIN_SCORE}点以上の候補がいません`, true); return; }
-  const [tpl, ver] = await Promise.all([
-    fetch("kit/qual_request_template.md").then(r => r.text()),
-    fetch("kit/version.json").then(r => r.json()).catch(() => ({ kit: "?" }))
-  ]);
-  const base = location.origin + location.pathname.replace(/[^/]*$/, "") + "kit";
-  const handles = list.map((c, i) => {
-    const sc = c.score || {};
-    const stance = c.qualStance ? ` / 語りの向き(一次判定): ${String(c.qualStance).split("(")[0]}` : "";
-    return `${i + 1}. @${c.username}(得点率 ${sc.rate}%${sc.mode === "rescue" ? "・救済採点" : ""}`
-      + ` / フォロワー ${c.followers == null ? "不明" : Number(c.followers).toLocaleString("ja-JP")}${stance})`;
-  }).join("\n");
-  const text = tpl
-    .replaceAll("{COUNT}", String(list.length))
-    .replaceAll("{HANDLES}", handles)
-    .replaceAll("{KIT_URL}", base)
-    .replaceAll("{BRAND}", (state.project && state.project.name) || "")
-    .replaceAll("{KIT_VERSION}", ver.kit || "?");
-  document.getElementById("qualReqText").value = text;
-  copyText(text, `精査データ依頼文をコピーしました(${list.length}名ぶん)`);
-}
-
-function copyText(text, msg) {
-  const fallback = () => {
-    const ta = document.getElementById("qualReqText");
-    if (ta) {
-      ta.value = text; ta.focus(); ta.select();
-      let ok = false;
-      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
-      if (ok) { toast(msg); return; }
-    }
-    toast("自動コピーができませんでした。下のテキスト欄を選択してコピーしてください", true);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast(msg), fallback);
-  else fallback();
-}
-
 export function mount() {
   /* 拡張の「③精査データ収集」向けに、精査待ち・不足人数・発掘プランを localStorage に出す。
    * 本体は js/pipeline/cdpQual.js（取得結果のマージ直後にも同じものが呼ばれる）。 */
   exportCdpQual(state.cands, { tags: (state.queue && state.queue.tags) || [] });
-  const qreq = document.getElementById("btnQualReq");
-  if (qreq) qreq.onclick = makeQualRequest;
   const drop = document.getElementById("dropQual"), file = document.getElementById("fileQual");
   drop.onclick = () => file.click();
   drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };

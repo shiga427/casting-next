@@ -2,6 +2,19 @@
 
 作成日:2026-07-30
 対象読者:実装者(Claude Code / Opus)およびオーナー
+
+> ⚠️ **2026-08-03 の実装との差分（この文書は v1.0 のまま保存する。書き換えない）**
+>
+> 収集の方式が変わっています。**「依頼文をコピーして利用者の Claude に貼る」フローは撤去済み**で、
+> 現在は同梱の **Casting Next 拡張(`extension/`)** が instagram.com のタブで直接収集します。
+> したがって以下は**現行実装には存在しません**:
+> §5-2 の依頼文生成ボタン ／ §8-3 依頼文テンプレート ／ §8-4 のプローブ配布UI ／
+> `kit/request_template.md`・`kit/discovery_template.md`・`kit/qual_request_template.md`。
+>
+> 現行の受け渡しは localStorage の3キー(`castnext_cdp_discover` / `castnext_cdp_queue` / `castnext_cdp_qual`)と、
+> 拡張から**ファイル入力への自動注入**です。現行の説明は `README.md` と `docs/guide.md` を正としてください。
+> （§5-6 の精査対象「上位10名」も、現在は**スコア60点以上**に変更済み。[[Decision-Log]] 2026-08-03）
+
 設計の前提資産:管制室 v1.4(SBIS v2.6)/ 発掘パイプライン v2.7 / 引き継ぎ書 run#6
 UI参考:salus(anypill ADS MONITOR)— 左サイドバー・KPIカード・「要対応/確認」バッジ付きのやさしい言葉の自動診断アラート
 

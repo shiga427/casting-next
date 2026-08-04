@@ -9,7 +9,7 @@ export const ROUTES = [
   { group: "分析", path: "qual", label: "精査・定性評価", view: "qual" },
   { group: "分析", path: "coverage", label: "探索カバレッジ", view: "coverage" },
   { group: "分析", path: "revive", label: "敗者復活", view: "revive" },
-  { group: "運用", path: "collect", label: "収集(キューと依頼文)", view: "collect" },
+  { group: "運用", path: "collect", label: "収集(発掘と取得)", view: "collect" },
   { group: "運用", path: "io", label: "データ入出力", view: "io" },
   { group: "運用", path: "settings", label: "設定・基準", view: "settings" },
   { group: "運用", path: "oplog", label: "運用ログ", view: "oplog" },

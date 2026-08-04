@@ -1,12 +1,17 @@
-/* 収集(キューと依頼文)— 設計書§5-2・§8。AIブラウザ操作の入口。
+/* 収集(発掘と取得)— 設計書§5-2・§8。
+ *
+ * ★2026-08-03: 「依頼文を作って Claude に貼る」旧フローは撤去した。
+ * 収集は **Casting Next 拡張(extension/)** が instagram.com のタブで行い、
+ * この画面は「拡張へ渡す条件を決める」「拡張が返した結果を受け取る」だけを担う。
  *
  * 2モード:
- *  ①「発掘から始める」 プール不要。プロジェクトの探索タグ(E1)を選んで、
- *    発掘(タグ検索)→取得(プロフィール)を一体で依頼する。初めての人の既定
- *  ②「プールから取得」 過去に集めたハンドルのプールから rank_queue v2.6 でキューを作る。2周目以降
+ *  ①「発掘から始める」 プール不要。探索タグ(E1)を選ぶ → 拡張の「①発掘して収集」。初めての人の既定
+ *  ②「プールから取得」 プールから rank_queue v2.6 でキューを作る → 拡張の「②プールから取得」。2周目以降
  *
- * 取得結果をドロップすると、①由来のハンドルは**プール・取得済み台帳・探索カバレッジ表**に
- * 自動で取り込まれる(js/pipeline/discovery.js)。これで2回目以降は①でも取得済み除外が効く。
+ * 受け渡し口:
+ *  - 渡す: localStorage の castnext_cdp_discover / castnext_cdp_queue（拡張の popup が読む）
+ *  - 受ける: **`<input type="file" id="file">`**。拡張の background.js が DataTransfer で
+ *    ここへ注入して自動反映する。★この input と change ハンドラを消すと収集が全部死ぬ
  */
 import { state, addRun, markDirty } from "../store.js";
 import { esc } from "../charts.js";
@@ -24,9 +29,21 @@ import { cdpQualSummary, exportCdpQual } from "../pipeline/cdpQual.js";
 
 const PREP = [
   ["chrome", "Chrome を使っている(収集には Chrome 拡張が必要です)"],
-  ["ext", "Claude の Chrome 拡張が入っていて、instagram.com でサイト権限が有効になっている"],
+  ["ext", "Casting Next 拡張(extension/ をデベロッパーモードで読み込み)が入っていて、instagram.com でサイト権限が有効になっている"],
   ["login", "instagram.com にご自身のアカウントでログインしている"],
 ];
+
+/* localStorage に最後に書き出した時刻を「最終送信 HH:MM」で見せる。
+ * 拡張へちゃんと渡っているかを、拡張を開かずに目視できるようにするため */
+function lastSentAt(key) {
+  try {
+    const at = JSON.parse(localStorage.getItem(key) || "{}").at;
+    if (!at) return "";
+    const d = new Date(at);
+    if (isNaN(d)) return "";
+    return `最終送信 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  } catch (e) { return ""; }
+}
 
 let preset = null;
 async function loadPreset() {
@@ -48,8 +65,8 @@ function currentMode() {
 export function render() {
   const mode = currentMode();
   return `
-  <div class="head"><h1>収集(キューと依頼文)</h1>
-    <span class="meta">取得は利用者ご自身の Claude と Instagram アカウントで行います(設計書§8)。DM送信・フォロー・いいねは一切しません</span>
+  <div class="head"><h1>収集(発掘と取得)</h1>
+    <span class="meta">取得は Casting Next 拡張が、ご自身の Chrome とログイン中の Instagram アカウントで行います。DM送信・フォロー・いいねは一切しません</span>
     <div class="runsel">
       <a class="chip ${mode === "discover" ? "on" : ""}" href="#/collect?mode=discover">① 発掘から始める</a>
       <a class="chip ${mode === "pool" ? "on" : ""}" href="#/collect?mode=pool">② プールから取得</a>
@@ -61,10 +78,11 @@ export function render() {
       ${mode === "discover" ? discoverCard() : poolCard()}
 
       <div class="card">
-        <h3>取得結果のドロップ<span class="r">.jsonl / 25列CSV</span></h3>
+        <h3>取得結果の取り込み<span class="r">拡張から自動で入ります</span></h3>
         <div class="drop" id="drop">
-          ここに <b>${esc(nextRunTag())}_compact.jsonl</b> をドラッグ&amp;ドロップ(またはクリックして選択)<br>
-          <span class="hint">ドロップした瞬間にブラウザ内で解析します。ファイルはどこにも送信されません。</span>
+          <b>拡張が収集を終えるとここに自動で入ります。</b>手動で .jsonl を入れることもできます<br>
+          <span class="hint">手動のときは <b>${esc(nextRunTag())}_compact.jsonl</b> をドラッグ&amp;ドロップ(またはクリックして選択)。
+            解析はこのブラウザの中だけで行い、ファイルはどこにも送信されません。</span>
           <input type="file" id="file" accept=".jsonl,.json,.csv,.txt" multiple style="display:none">
         </div>
         <div class="hint" id="log"></div>
@@ -93,7 +111,7 @@ function discoverCard() {
   return `
   <div class="card">
     <h3>① 発掘から始める<span class="r">プールがなくても始められます</span></h3>
-    <p class="hint">プロジェクトの探索タグ(E1)から候補を集め、そのままプロフィール取得まで1回の依頼で行います。
+    <p class="hint">プロジェクトの探索タグ(E1)から候補を集め、そのままプロフィール取得まで拡張が続けて行います。
       集まったハンドルは取得後に自動でプールへ入るので、2回目からは②も使えます。</p>
 
     ${tags.length ? `<div class="tagpick">
@@ -106,12 +124,13 @@ function discoverCard() {
       <button class="btn ghost sm" id="btnLife">生活文脈タグだけ</button>
       <label class="hint">目標件数 <input type="number" id="dTarget" value="${target}" min="10" max="300" style="width:80px"></label>
     </div>
-    <div class="toolrow">
-      <button class="btn" id="btnDiscover">発掘依頼文を作ってコピー</button>
-      <button class="btn ghost sm" id="btnProbe">プローブ全文をコピー</button>
-      <span class="hint">取得済み ${done.size}件は依頼文の中で除外されます</span>
+    <div class="sendbox">
+      <b>拡張に渡す準備</b>
+      <div class="hint">選択中のタグ ${chosen ? chosen.length : tags.length}件 / 目標 ${target}件 /
+        取得済み ${done.size}件は拡張へ渡す対象から除外されます</div>
+      <div class="hint">→ <b>拡張ポップアップの「①発掘して収集」</b>を押してください（このページは開いたままに）</div>
+      <div class="hint sent" id="dSent">${esc(lastSentAt("castnext_cdp_discover"))}</div>
     </div>
-    <textarea id="reqText" rows="10" placeholder="「発掘依頼文を作ってコピー」を押すとここに出ます(コピー済み)"></textarea>
     <div class="note">生活文脈タグは行動タグの2倍の帯内率・2.5倍の有効率が出ています(run#6実測)。迷ったら生活文脈タグから。</div>`
     : `<div class="hint">タグを読み込んでいます…</div>`}
   </div>`;
@@ -144,11 +163,14 @@ function poolCard() {
         <td class="handle">@${esc(r.handle)}</td><td class="num">${r.score}</td>
         <td class="hint">${esc(String(r.tags).slice(0, 24))}</td><td class="hint">${esc(String(r.why).slice(0, 42))}</td></tr>`).join("")}</tbody>
     </table></div>` : ""}
-    <div class="toolrow" style="margin-top:10px">
-      <button class="btn" id="btnReq" ${q.queue && q.queue.length ? "" : "disabled"}>取得依頼文を作ってコピー</button>
-      <button class="btn ghost sm" id="btnProbe">プローブ全文をコピー</button>
+    <div class="sendbox">
+      <b>拡張に渡す準備</b>
+      <div class="hint">${q.queue && q.queue.length
+        ? `キュー ${q.queue.length}件を拡張へ渡しています`
+        : "まず「キューを作る」を押してください（作った時点で拡張へ渡ります）"}</div>
+      <div class="hint">→ <b>拡張ポップアップの「②プールから取得」</b>を押してください（このページは開いたままに）</div>
+      <div class="hint sent" id="qSent">${esc(lastSentAt("castnext_cdp_queue"))}</div>
     </div>
-    <textarea id="reqText" rows="8" placeholder="「キューを作る」→「取得依頼文を作ってコピー」の順に押してください"></textarea>
   </div>`;
 }
 
@@ -198,8 +220,6 @@ export function mount() {
     state.queue.prep = { ...(state.queue.prep || {}), [cb.dataset.k]: cb.checked };
     markDirty();
   });
-  const probe = $("btnProbe");
-  if (probe) probe.onclick = copyProbe;
 
   if (currentMode() === "discover") mountDiscover();
   else mountPool();
@@ -232,41 +252,7 @@ async function mountDiscover() {
     exportCdpDiscover(chosen());
     markDirty();
   };
-  if ($("btnDiscover")) $("btnDiscover").onclick = () => makeDiscoveryRequest(chosen());
   exportCdpDiscover(chosen()); // 画面表示時点の選択を拡張へ渡す
-}
-
-async function makeDiscoveryRequest(tags) {
-  if (!tags.length) { toast("タグを1つ以上選んでください", true); return; }
-  const target = Number(document.getElementById("dTarget").value) || 100;
-  const runTag = nextRunTag();
-  const [tpl, ver] = await Promise.all([
-    fetch("kit/discovery_template.md").then(r => r.text()),
-    fetch("kit/version.json").then(r => r.json()).catch(() => ({ kit: "?" }))
-  ]);
-  const lifeSet = new Set(tagCache.filter(t => t.life).map(t => t.tag));
-  const tagList = tags.map((t, i) => `${i + 1}. ${t}${lifeSet.has(t) ? "(生活)" : ""}`).join("\n");
-  const done = [...doneSet()].sort();
-  const doneText = done.length
-    ? (done.length > 400
-      ? done.slice(0, 400).map(h => "@" + h).join(" ") + `\n…ほか ${done.length - 400}件(全件は管制室の「データ入出力」から書き出せます)`
-      : done.map(h => "@" + h).join(" "))
-    : "(まだ1件も取得していません。今回は全部が新規です)";
-  const base = location.origin + location.pathname.replace(/[^/]*$/, "") + "kit";
-  const text = tpl
-    .replaceAll("{RUN_TAG}", runTag)
-    .replaceAll("{TARGET}", String(target))
-    .replaceAll("{TAGS}", tagList)
-    .replaceAll("{DONE_HANDLES}", doneText)
-    .replaceAll("{KIT_URL}", base)
-    .replaceAll("{BAND_MIN}", (state.conf.microMin || 5000).toLocaleString("ja-JP"))
-    .replaceAll("{BAND_MAX}", (state.conf.midMax || 100000).toLocaleString("ja-JP"))
-    .replaceAll("{BRAND}", (state.project && state.project.name) || "")
-    .replaceAll("{KIT_VERSION}", ver.kit || "?");
-  document.getElementById("reqText").value = text;
-  state.queue = { ...(state.queue || {}), mode: "discover", tags, target, runTag, at: new Date().toISOString() };
-  markDirty();
-  copy(text, "発掘依頼文をコピーしました。ご自身の Claude に貼り付けてください");
 }
 
 /* ---- ② プールモード ---------------------------------------------------- */
@@ -277,7 +263,6 @@ function mountPool() {
   $("btnDone").onclick = () => $("fileDone").click();
   $("fileDone").onchange = e => { readOne(e.target.files[0], loadDone); e.target.value = ""; };
   $("btnQueue").onclick = makeQueue;
-  $("btnReq").onclick = makeRequest;
 }
 
 function readFiles(files) { [...files].forEach(f => readOne(f, handleFile)); }
@@ -346,49 +331,19 @@ function makeQueue() {
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
-async function makeRequest() {
-  const q = state.queue;
-  if (!q || !q.queue || !q.queue.length) { toast("先にキューを作ってください", true); return; }
-  const [tpl, ver] = await Promise.all([
-    fetch("kit/request_template.md").then(r => r.text()),
-    fetch("kit/version.json").then(r => r.json()).catch(() => ({ kit: "?" }))
-  ]);
-  const base = location.origin + location.pathname.replace(/[^/]*$/, "") + "kit";
-  const handles = q.queue.map((r, i) => `${i + 1}. @${r.handle}${r.tags ? `(tags: ${String(r.tags).trim()})` : ""}`).join("\n");
-  const text = tpl
-    .replaceAll("{RUN_TAG}", q.runTag)
-    .replaceAll("{COUNT}", String(q.queue.length))
-    .replaceAll("{KIT_URL}", base)
-    .replaceAll("{HANDLES}", handles)
-    .replaceAll("{BAND_MIN}", (state.conf.microMin || 5000).toLocaleString("ja-JP"))
-    .replaceAll("{BAND_MAX}", (state.conf.midMax || 100000).toLocaleString("ja-JP"))
-    .replaceAll("{BRAND}", (state.project && state.project.name) || "")
-    .replaceAll("{KIT_VERSION}", ver.kit || "?");
-  document.getElementById("reqText").value = text;
-  copy(text, "取得依頼文をコピーしました。ご自身の Claude に貼り付けてください");
-}
-
-async function copyProbe() {
-  const [probe, prof] = await Promise.all([
-    fetch("kit/ig_probe.js").then(r => r.text()),
-    fetch("kit/prof_compact.js").then(r => r.text())
-  ]);
-  copy(`/* ① ig_probe.js — そのまま評価してください */\n${probe}\n\n/* ② prof_compact.js — そのまま評価してください */\n${prof}`,
-    "プローブ全文をコピーしました(fetch できない環境用の代替経路です)");
-}
+/* エラー内容などをコピーするための最小ヘルパ。
+ * Clipboard API が使えない環境(権限なし・http 等)では一時 textarea + execCommand に落とす。 */
 function copy(text, msg) {
-  /* Clipboard API が使えない環境(権限なし・http 等)では、テキスト欄を選択して
-     execCommand にフォールバックする。それも駄目なら手動コピーを案内する。 */
   const fallback = () => {
-    const ta = document.getElementById("reqText");
-    if (ta) {
-      ta.value = text;
-      ta.focus(); ta.select();
-      let ok = false;
-      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
-      if (ok) { toast(msg); return; }
-    }
-    toast("自動コピーができませんでした。下のテキスト欄を選択してコピーしてください", true);
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    ta.remove();
+    toast(ok ? msg : "自動コピーができませんでした。手で選択してコピーしてください", !ok);
   };
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(() => toast(msg), fallback);
@@ -421,7 +376,7 @@ function handleJsonl(text, name) {
     const why = run.badLines.slice(0, 3).map(b => `${b.line}行目:${b.why}`).join(" / ");
     const el = document.getElementById("log");
     if (el) el.innerHTML = `⚠ 読めるレコードが1件もありません。${esc(why)}
-      <button class="btn ghost sm" id="btnCopyErr">このエラーをコピー(Claudeに渡す用)</button>`;
+      <button class="btn ghost sm" id="btnCopyErr">このエラーをコピー</button>`;
     const b = document.getElementById("btnCopyErr");
     if (b) b.onclick = () => copy(run.badLines.map(x => `${x.line}行目: ${x.why}`).join("\n"), "エラー内容をコピーしました");
     toast("この形式は読めませんでした", true);

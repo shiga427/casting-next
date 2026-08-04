@@ -109,7 +109,7 @@ export function absorbRun(run, current) {
   };
 }
 
-/* 発掘依頼文の対象タグ。プロジェクトのプリセットから作る(ステムボーテ固定にしない) */
+/* 発掘の対象タグ(拡張へ渡す候補)。プロジェクトのプリセットから作る(ステムボーテ固定にしない) */
 export function discoveryTags(preset) {
   const s = (preset && preset.search) || {};
   const tags = [];

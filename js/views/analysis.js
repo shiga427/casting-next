@@ -63,8 +63,7 @@ export function render() {
     <div class="kpi"><div class="l">rate_limited</div><div class="v">${run.rateLimited || 0}</div><div class="d">${run.rateLimited ? "ペースを落としてください" : "制限なし"}</div></div>
   </div>
   ${missing ? `<div class="card" style="margin-top:12px"><h3>欠測 ${missing}件の復旧手順</h3>
-    <p class="hint">同一セッション内でプローブを再注入して再取得すると users_info 経路で復旧します(run#6 で 20/20 復旧の実績)。
-    依頼文にも同じ手順が入っています。</p></div>` : ""}
+    <p class="hint">拡張で同じ対象をもう一度収集すると users_info 経路で復旧します(run#6 で 20/20 復旧の実績)。</p></div>` : ""}
 
   <div class="cols" style="margin-top:14px">
     <div>

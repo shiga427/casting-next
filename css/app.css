@@ -83,6 +83,12 @@ th { background: #FBF7F2; color: var(--sub); font-weight: 700; text-align: left;
 td { padding: 8px 10px; border-bottom: 1px solid #F3EDE6; vertical-align: top; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.click:hover { background: #FBF3EE; cursor: pointer; }
+/* 「拡張に渡す準備」ブロック（依頼文textareaの跡地）。次に押すボタンが拡張側だと分かる見た目にする */
+.sendbox { margin: 10px 0 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; background: #FBF7F2; }
+.sendbox b { font-size: 12px; }
+.sendbox .hint { margin-top: 3px; }
+.sendbox .sent { color: var(--brand-700); font-variant-numeric: tabular-nums; }
+
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { background: #F3E7DC; color: var(--brand-700); }
 th.sortable.on { color: var(--brand-700); }
