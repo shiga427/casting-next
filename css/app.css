@@ -89,6 +89,10 @@ tr.click:hover { background: #FBF3EE; cursor: pointer; }
 .sendbox .hint { margin-top: 3px; }
 .sendbox .sent { color: var(--brand-700); font-variant-numeric: tabular-nums; }
 
+/* 候補ボードの選択列（一括DM用・設計書_DM自動一括送付 §2-1）。並べ替えの対象にしない列 */
+td.sel, th.sel { width: 28px; padding-right: 0; text-align: center; }
+td.sel input, th.sel input { cursor: pointer; margin: 0; }
+
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { background: #F3E7DC; color: var(--brand-700); }
 th.sortable.on { color: var(--brand-700); }

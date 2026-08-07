@@ -30,6 +30,10 @@ postscreen_review*.csv
 候補リスト_*.md
 stembeaute_casting_*.json
 
+# DM送付の監査ログ（設計書_DM自動一括送付 §6-6・§10）。実在ハンドルが入るので公開リポジトリに入れない
+dm/
+*_dm_log.jsonl
+
 # ただし匿名化済みfixtureとオンボーディング用サンプルは明示的に許可
 # (どちらも tools/build_fixtures.mjs が匿名化して生成したもの)
 !tests/fixtures/*.jsonl

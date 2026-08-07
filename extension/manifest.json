@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Casting Next 収集ツール",
-  "version": "1.0.0",
-  "description": "instagram.com のログインセッションで、キャスティング管制室の収集をボタン1回で行う（Claude/LLM非経由）。取得のみ・DM/フォロー/いいねは一切しない。",
-  "permissions": ["scripting", "downloads", "tabs", "storage"],
+  "version": "1.1.0",
+  "description": "instagram.com のログインセッションで、キャスティング管制室の収集をボタン1回で行う（Claude/LLM非経由）。書き込みは候補ボードでチェックした候補へのDM送付のみ。フォロー・いいね・投稿はしない。",
+  "permissions": ["scripting", "downloads", "tabs", "storage", "clipboardWrite"],
   "host_permissions": [
     "https://www.instagram.com/*",
     "https://instagram.com/*",
@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["https://www.instagram.com/*", "https://instagram.com/*"],
-      "js": ["igf/ig_probe.js", "igf/prof_compact.js", "content_ig.js"],
+      "js": ["igf/ig_probe.js", "igf/prof_compact.js", "dm_runner.js", "content_ig.js"],
       "run_at": "document_idle"
     }
   ],

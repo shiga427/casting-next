@@ -32,6 +32,9 @@ function bindProgress(barId, statusId) {
     else if (p.phase === 'discover_done') { $(statusId).textContent = `発掘完了：候補${p.discovered} / 新規${p.fresh} / 取得対象${p.picked}。取得を開始します…`; setBar(0, 1); }
     else if (p.phase === 'collect') { $(statusId).textContent = `取得中 [${p.i}/${p.n}] ${p.handle} ${p.err ? 'NG(' + p.err + ')' : 'OK'}`; setBar(p.i, p.n); }
     else if (p.phase === 'qual') { $(statusId).textContent = `精査データ収集中 [${p.i}/${p.n}] @${p.handle}`; setBar(p.i, p.n); }
+    else if (p.phase === 'dm_wait') { $(statusId).textContent = `レート待機中 ${Math.round(p.waitMs / 1000)}秒 → 次は @${p.handle} [${p.i}/${p.n}]`; setBar(p.i - 1, p.n); }
+    else if (p.phase === 'dm') { $(statusId).textContent = `DM処理中 [${p.i}/${p.n}] @${p.handle}`; setBar(p.i, p.n); }
+    else if (p.phase === 'dm_result') { $(statusId).textContent = `[${p.i}/${p.n}] @${p.handle} → ${p.result}`; setBar(p.i, p.n); }
   };
   chrome.runtime.onMessage.addListener(onMsg);
   return () => chrome.runtime.onMessage.removeListener(onMsg);
@@ -49,6 +52,13 @@ function doneSummary(statusId, result) {
 // 自動反映の結果（background から）を、開いていれば表示に足す
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.type !== 'IGF_AUTOIMPORT') return;
+  if (msg.dm) {
+    const d = document.getElementById('dmstatus');
+    if (d) d.textContent += (msg.result && msg.result.done)
+      ? '\n✔ ダッシュボードに反映しました（候補ボードをご確認ください）'
+      : '\n（ダッシュボード未オープンのため未反映。開いてから popup を開き直すと反映します）';
+    return;
+  }
   const el = document.querySelector('.pane.on #status, .pane.on #dstatus') || document.getElementById('dstatus');
   if (!el) return;
   el.textContent += (msg.result && msg.result.done)
@@ -239,6 +249,215 @@ async function runQual() {
   finally { $('btnQual').disabled = false; }
 }
 
+/* ---------------- ④ DM送付（設計書_DM自動一括送付 §5-4） ----------------
+ * ★ここは唯一の書き込み経路。フォロー・いいね・投稿は実装しない。
+ * ★キューは候補ボードで人がチェックした候補だけ。popup 側で対象を増やさない。 */
+const DM_DRAFTS_KEY = 'castnext_dm_drafts';
+const DM_PENDING_KEY = 'castnext_dm_pending';
+const DM_DAILY_KEY = 'castnext_dm_daily';
+let dmQueue = null;
+
+function stGet(keys) { return new Promise((r) => { try { chrome.storage.local.get(keys, (v) => r(v || {})); } catch (e) { r({}); } }); }
+function stSet(obj) { return new Promise((r) => { try { chrome.storage.local.set(obj, () => r(true)); } catch (e) { r(false); } }); }
+
+/* ★popup では window.confirm() を使わないこと。
+ * 拡張のポップアップでネイティブダイアログを開くとポップアップがフォーカスを失って閉じ、
+ * JSコンテキストごと壊れるので confirm() の後ろが実行されない（＝押しても無反応・原因も出ない）。
+ * 取り消せない操作の確認は「もう一度押す」の2段階でポップアップ内に閉じる。 */
+const armed = new Map();
+function armOrGo(btnId, label, go) {
+  const b = $(btnId);
+  const prev = armed.get(btnId);
+  if (prev) { clearTimeout(prev.timer); armed.delete(btnId); b.textContent = prev.label; b.classList.remove('danger'); go(); return; }
+  const orig = b.textContent;
+  b.textContent = label;
+  b.classList.add('danger');
+  const timer = setTimeout(() => { armed.delete(btnId); b.textContent = orig; b.classList.remove('danger'); }, 30000);
+  armed.set(btnId, { timer, label: orig });
+}
+
+/* instagram.com のタブで動いている content script が「今の拡張のもの」かを確かめる。
+ * 拡張をリロードしただけでは既存タブの content script は入れ替わらない（古いまま or 無効化済み）。 */
+async function pingIgTab(tabId, need) {
+  try {
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'IGF_PING' });
+    if (!r || !r.ok) return { ok: false, reason: 'no-response' };
+    if (need && !(r.features || []).includes(need)) return { ok: false, reason: 'stale', features: r.features || [] };
+    return { ok: true, info: r };
+  } catch (e) { return { ok: false, reason: 'no-listener', error: String(e && e.message) }; }
+}
+const RELOAD_HINT = 'instagram.com のタブを再読込してから、もう一度押してください。\n'
+  + '（拡張をリロードしても、開いたままのタブの中身は古いままなので届きません）';
+
+function dmLine(q) {
+  const n = (q.items || []).length;
+  const ex = (q.excluded || []).length;
+  return `${q.mode === 'auto' ? '全自動' : '半自動'}${q.dryRun ? '・ドライラン' : ''} ${n}件`
+    + `\nレート ${Math.round(q.minWaitMs / 1000)}〜${Math.round(q.maxWaitMs / 1000)}秒間隔 / 1分あたり${q.perMinMax}通 / 日次上限${q.dailyCap}件`
+    + (ex ? `\nガードで除外 ${ex}件（ダッシュボードのパネルに理由が出ています）` : '')
+    + ((q.deferred || 0) > 0 ? `\n日次上限のため 残り ${q.deferred}名は次回` : '');
+}
+
+async function reloadDmQueue() {
+  $('dmInfo').textContent = 'ダッシュボードから送付キュー取得中…';
+  const r = await readDashboard('castnext_cdp_dm');
+  if (r.error || !r.raw) {
+    dmQueue = null; $('btnDm').disabled = true;
+    $('dmInfo').textContent = r.error || '送付キューがありません。ダッシュボードの候補ボードで候補をチェックし、「送付キューを書き出す」を押してください。';
+    return;
+  }
+  try {
+    const q = JSON.parse(r.raw);
+    dmQueue = (q.items && q.items.length) ? q : null;
+    $('btnDm').disabled = !dmQueue;
+    const today = await dmSentToday();
+    $('dmInfo').textContent = dmQueue
+      ? dmLine(dmQueue) + `\n本日この拡張が送った実績 ${today}件（§6-2 の二重ガード）`
+      : '送付キューが空です。';
+  } catch (e) { dmQueue = null; $('btnDm').disabled = true; $('dmInfo').textContent = '送付キューの読取に失敗しました。'; }
+}
+
+async function dmSentToday() {
+  const v = (await stGet([DM_DAILY_KEY]))[DM_DAILY_KEY];
+  return (v && v.day === new Date().toISOString().slice(0, 10)) ? Number(v.sent) || 0 : 0;
+}
+
+async function renderDrafts() {
+  const drafts = (await stGet([DM_DRAFTS_KEY]))[DM_DRAFTS_KEY] || [];
+  const box = $('dmDrafts');
+  if (!drafts.length) { box.textContent = '下書きはありません。'; return; }
+  box.innerHTML = drafts.map((d, i) =>
+    `<div style="display:flex;gap:6px;align-items:center;margin:4px 0">
+       <span style="flex:1">@${String(d.handle).replace(/[<>&]/g, '')}</span>
+       <button class="btn ghost" style="width:auto;padding:4px 10px" data-draft="${i}">開く</button>
+       <button class="btn" style="width:auto;padding:4px 10px" data-sent="${i}">送信した</button>
+     </div>`).join('')
+    + `<button class="btn ghost" style="margin-top:6px" id="btnDraftClear">下書きを全部消す</button>`;
+  /* 「送信した」＝人が送ったことの申告。ここで初めて status が「DM送付」に進み、
+   * dmSentAt が入って既存の dmDue（5営業日でリマインド期限）が動き出す（§7）。
+   * 機械は人が送ったかを知りようがないので、この1クリックが唯一の確定手段。 */
+  box.querySelectorAll('[data-sent]').forEach((b) => b.onclick = async () => {
+    const d = drafts[Number(b.dataset.sent)];
+    if (!d) return;
+    if (d.test) {   /* 動作確認用の下書きは候補ではないので、状態も監査ログも触らない */
+      const rest = drafts.filter((x) => x !== d);
+      await stSet({ [DM_DRAFTS_KEY]: rest }); renderDrafts();
+      $('dmstatus').textContent = '動作確認用の下書きを片付けました（候補の状態は変えていません）。';
+      return;
+    }
+    try { chrome.runtime.sendMessage({ type: 'IGF_DM_SENT_MANUAL', handle: d.handle, text: d.text }); } catch (e) { /* noop */ }
+    const rest = drafts.filter((x) => x !== d);
+    await stSet({ [DM_DRAFTS_KEY]: rest });
+    renderDrafts();
+    $('dmstatus').textContent = `@${d.handle} を「DM送付」にしました。\n`
+      + '監査ログに記録し、ダッシュボードが開いていれば候補ボードにも反映します。\n'
+      + '5営業日で返信待ちの期限アラートが出ます。';
+  });
+  box.querySelectorAll('[data-draft]').forEach((b) => b.onclick = async () => {
+    const d = drafts[Number(b.dataset.draft)];
+    if (!d) return;
+    /* ★本文を先にクリップボードへ入れる。
+     * DMの入力欄は Lexical 製で、自動入力が通るとは限らない（実機で通らなかった）。
+     * 自動入力が失敗しても ⌘V で貼れる状態にしておけば、人は必ず先へ進める。
+     * popup のクリック中＝ドキュメントにフォーカスがあるので、ここが最も確実にコピーできる場所。 */
+    let copied = false;
+    try { await navigator.clipboard.writeText(d.text); copied = true; }
+    catch (e) {
+      try {   /* 古い経路のフォールバック */
+        const ta = document.createElement('textarea');
+        ta.value = d.text; document.body.appendChild(ta); ta.select();
+        copied = document.execCommand('copy'); ta.remove();
+      } catch (e2) { copied = false; }
+    }
+    $('dmstatus').textContent = copied
+      ? `@${d.handle} の本文をコピーしました。\nDM画面が開いたら、自動で入らなければ ⌘V で貼り付けてください。`
+      : `@${d.handle} のDM画面を開きます（本文のコピーに失敗しました）。`;
+    // DMページを開き、content_ig が本文を流し込む。送信ボタンは押さない（人が押す）。
+    // ig.me/m/<handle> は handle だけで1:1スレッドが開く（2026-08-04 実機確認）。
+    await stSet({ [DM_PENDING_KEY]: Object.assign({}, d, { copied }) });
+    const url = d.handle ? 'https://ig.me/m/' + encodeURIComponent(d.handle)
+      : 'https://www.instagram.com/direct/t/' + encodeURIComponent(d.userId) + '/';
+    await chrome.tabs.create({ url, active: true });
+  });
+  const clr = $('btnDraftClear');
+  if (clr) clr.onclick = async () => { await stSet({ [DM_DRAFTS_KEY]: [] }); renderDrafts(); };
+}
+
+async function runDmSend() {
+  if (!dmQueue) { $('dmstatus').textContent = '送付キューがありません。'; return; }
+  const n = (dmQueue.items || []).length;
+  const already = await dmSentToday();
+  // §6-2 拡張側の二重ガード。ダッシュボードのカウントを信用しきらない
+  if (!dmQueue.dryRun && dmQueue.mode === 'auto' && already >= dmQueue.dailyCap) {
+    $('dmstatus').textContent = `本日すでに ${already}件送っています（上限 ${dmQueue.dailyCap}件）。今日はこれ以上送りません。`;
+    return;
+  }
+  const head = dmQueue.dryRun ? `ドライラン ${n}件（送信しません）`
+    : dmQueue.mode === 'auto' ? `全自動で ${n}件に送信します` : `半自動で ${n}件の下書きを作ります（送信はご自身で）`;
+  /* 実送信だけ2段階にする（confirm() は使わない。上の armOrGo のコメント参照） */
+  if (!dmQueue.dryRun && dmQueue.mode === 'auto') {
+    armOrGo('btnDm', `⚠ もう一度押すと ${n}件に本当に送ります`, () => doDmSend(head));
+    return;
+  }
+  doDmSend(head);
+}
+
+async function doDmSend(head) {
+  const ig = await ensureIgTab();
+  $('btnDm').disabled = true; $('btnDmStop').disabled = false;
+  $('dmstatus').textContent = `${head}\n最初の1件を処理しています…`;
+  const unbind = bindProgress('dmbarFill', 'dmstatus');
+  try {
+    const ping = await pingIgTab(ig.id, 'IGF_DM');
+    if (!ping.ok) {
+      unbind();
+      $('dmstatus').textContent = (ping.reason === 'stale'
+        ? '⚠ instagram.com のタブが古い拡張のままです（DM機能が入っていません）。\n'
+        : '⚠ instagram.com のタブに届きませんでした。\n') + RELOAD_HINT;
+      return;
+    }
+    const result = await chrome.tabs.sendMessage(ig.id, { type: 'IGF_DM', payload: dmQueue });
+    unbind();
+    if (!result || !result.ok) { $('dmstatus').textContent = '失敗: ' + ((result && result.error) || '不明'); return; }
+    const s = result.stats || {};
+    $('dmstatus').textContent = `完了（@${s.viewer}）\n`
+      + (s.dryRun ? `ドライラン ${s.skipped}件（送信API未呼出）\n` : `送信 ${s.sent} / 下書き ${s.draft} / 失敗 ${s.failed}\n`)
+      + (s.stopped ? `⚠ ${s.stopped} で全停止しました\n` : '')
+      + `→ 監査ログを casting-next/dm/ に保存。ダッシュボードが開いていれば状態を反映します…`;
+    renderDrafts();
+    reloadDmQueue();
+  } catch (e) {
+    unbind();
+    $('dmstatus').textContent = 'タブ送信に失敗: ' + (e && e.message) + '\ninstagram.com のタブを再読込して再実行してください。';
+  } finally { $('btnDm').disabled = false; $('btnDmStop').disabled = true; }
+}
+
+/* 動作確認用の下書き（§9-5 の実機確認を、候補データ抜きで行うため）。
+ * ★入れるのは固定の確認用テキストだけ。案内文は入らない。
+ *   ここから案内文を送れてしまうと「チェックした候補にしか送らない」(§10)の抜け道になる。
+ * ★Instagramへのアクセスは0回。下書きをキューに積むだけで、送信は人が押す。 */
+const DM_TEST_TEXT = '（Casting Next の動作確認です。この文章に意味はありません）';
+async function makeTestDraft() {
+  const handle = $('dmTestHandle').value.trim().replace(/^@/, '');
+  if (!handle) { $('dmstatus').textContent = '相手のハンドルを入れてください。'; return; }
+  const cur = (await stGet([DM_DRAFTS_KEY]))[DM_DRAFTS_KEY] || [];
+  const next = cur.filter((x) => String(x.handle).toLowerCase() !== handle.toLowerCase());
+  next.push({ handle, userId: '', text: DM_TEST_TEXT, at: new Date().toISOString(), test: true });
+  await stSet({ [DM_DRAFTS_KEY]: next });
+  await renderDrafts();
+  $('dmstatus').textContent = `@${handle} の確認用の下書きを作りました。\n`
+    + '下の一覧の「開く」を押すと、DM画面が開いて入力欄に文字が入ります。\n'
+    + '**入るかどうかだけ**を見てください。送信は不要です（送っても確認用の文章です）。';
+}
+
+async function stopDm() {
+  $('dmstatus').textContent += '\n停止を送信しました…';
+  try {
+    const t = await findTab(['https://www.instagram.com/', 'https://instagram.com/']);
+    if (t) await chrome.tabs.sendMessage(t.id, { type: 'IGF_DM_ABORT' });
+  } catch (e) { /* 走っていなければ無害 */ }
+}
+
 /* ---------------- タブ切替・初期化 ---------------- */
 document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === t));
@@ -252,6 +471,10 @@ $('btnDiscover').onclick = runDiscover;
 $('btnQReload').onclick = reloadQualHandles;
 $('btnQual').onclick = runQual;
 $('qhandles').oninput = refreshQual;
+$('btnDmReload').onclick = reloadDmQueue;
+$('btnDm').onclick = runDmSend;
+$('btnDmStop').onclick = stopDm;
+$('btnDmTest').onclick = makeTestDraft;
 // タグ・目標件数はブラウザに保存して、次に開いたとき復元する（都度入力しなくてよい）
 $('dtags').oninput = () => { refreshDiscover(); try { chrome.storage.local.set({ dtags: $('dtags').value }); } catch (e) {} };
 $('dtarget').oninput = () => { refreshDiscover(); try { chrome.storage.local.set({ dtarget: $('dtarget').value }); } catch (e) {} };
@@ -265,3 +488,4 @@ try {
 reloadQueue();
 refreshDiscover();
 refreshQual();
+renderDrafts();

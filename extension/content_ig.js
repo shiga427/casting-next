@@ -1,11 +1,13 @@
 /* content_ig.js — instagram.com のタブ(分離ワールド)で動く収集ランナー。
  *
- * この前に igf/ig_probe.js と igf/prof_compact.js が注入され、window.IGF と
- * window.__PROF が同じ分離ワールドに定義されている（manifest 参照）。
- * 取得ロジックは kit の実装そのまま。ここは配線＋発掘(タグ→ハンドル)だけを担う。
+ * この前に igf/ig_probe.js・igf/prof_compact.js・dm_runner.js が注入され、window.IGF /
+ * window.__PROF / window.__CASTNEXT_DM が同じ分離ワールドに定義されている（manifest 参照）。
+ * 取得ロジックは kit の実装そのまま。ここは配線＋発掘(タグ→ハンドル)＋DM送付の配線を担う。
  *
  * 分離ワールドの fetch は instagram.com と同一オリジンなので Cookie が乗る。
- * DM/フォロー/いいね/投稿はしない。 */
+ *
+ * ★書き込み操作は「候補ボードで人がチェックした相手へのDM送付」だけ（設計書_DM自動一括送付 §0）。
+ *   フォロー・いいね・投稿・UA偽装は引き続き一切しない。 */
 (function () {
   'use strict';
   if (window.__CASTNEXT_RUNNER__) return;
@@ -300,24 +302,247 @@
     return { ok: true, jsonl: records.map((r) => JSON.stringify(r)).join('\n') + '\n', stats, runTag: payload.runTag || 'run' };
   }
 
+  // ---------------- ④ DM送付（設計書_DM自動一括送付 §5）----------------
+  // ★ここが唯一の書き込み経路。フォロー・いいね・投稿は実装しない（する予定も無い）。
+
+  // 実送信エンドポイントの実応答を1件で確認するまで、auto の実送信を**コードで塞ぐ**（§5-3・§10）。
+  // 「引き継ぎスニペットを鵜呑みにしない」を運用の約束ではなくガードとして持たせている。
+  // 実機で1件確認し、下の sendDirect の形が現行仕様と一致することを確かめてから true にすること。
+  const DM_SEND_ENDPOINT_VERIFIED = false;
+  const DM_DRAFTS_KEY = 'castnext_dm_drafts';
+  const DM_PENDING_KEY = 'castnext_dm_pending';
+  const DM_DAILY_KEY = 'castnext_dm_daily';
+
+  const today10s = () => new Date().toISOString().slice(0, 10);
+  function stGet(keys) { return new Promise((r) => { try { chrome.storage.local.get(keys, (v) => r(v || {})); } catch (e) { r({}); } }); }
+  function stSet(obj) { return new Promise((r) => { try { chrome.storage.local.set(obj, () => r(true)); } catch (e) { r(false); } }); }
+
+  // §6-2 日次上限の二重ガード。ダッシュボードのカウントを信用せず拡張側でも数える
+  async function dmDailyCount() {
+    const v = (await stGet([DM_DAILY_KEY]))[DM_DAILY_KEY];
+    return (v && v.day === today10s()) ? Number(v.sent) || 0 : 0;
+  }
+  async function dmDailyBump() {
+    const cur = await dmDailyCount();
+    await stSet({ [DM_DAILY_KEY]: { day: today10s(), sent: cur + 1 } });
+  }
+
+  // 送信先の user_id。収集済みに無いときだけ web_profile_info を1回引く（新規IGアクセスの最小化・§5-3）
+  async function resolveUserId(handle) {
+    const h = String(handle || '').replace(/^@/, '').trim();
+    if (!h) return '';
+    const res = await window.IGF.profile(h);
+    for (const rr of (res.responses || [])) {
+      const b = rr && rr.body; if (!b) continue;
+      const w = b.data && (b.data.user || (b.data.xdt_api__v1__users__web_profile_info && b.data.xdt_api__v1__users__web_profile_info.user));
+      if (w && (w.id || w.pk)) return String(w.id || w.pk);
+      if (b.user && (b.user.pk || b.user.id)) return String(b.user.pk || b.user.id);
+    }
+    return '';
+  }
+
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  function uuid() {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    const s = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+    return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+  }
+
+  /* 実送信について（2026-08-04 実機で確定・設計書§5-3 の前提が崩れた）
+   *
+   * 設計書は `POST /api/v1/direct_v2/threads/broadcast/text/` を送信経路としていたが、**これは使えない**:
+   *   ・このエンドポイントに実際にPOSTすると JSON ではなく**ログインページ**が返り、
+   *     セッションが切れる挙動（強制ログアウト）が出た
+   *   ・人が手で送ったDMを chrome.webRequest でネットワーク層から観測したところ、
+   *     このエンドポイントへのPOSTは **1件も発生しなかった**（65件のトレース中0件）
+   *   ・実際の送信は `POST /api/graphql`（Meta Comet/Relay の永続化クエリ）で、
+   *     `doc_id` / `fb_api_req_friendly_name` / `fb_dtsg` / `lsd` / `jazoest` /
+   *     `__dyn` `__csr` `__hs` `__rev` などクライアントのビルドごとに変わる値を伴う
+   *
+   * これを拡張から再現するのは、IGのリリースのたびに壊れる不安定な代物になる。
+   * モバイル私設APIの利用とUA偽装は設計書§5-3・§10 で禁止されている。
+   * したがって **この拡張から全自動でDMを送る経路は用意しない**。半自動（下書き＋人が送信）が上限。
+   *
+   * ★復活させるときは、実際の送信リクエストを観測した記録を根拠として必ず添えること。
+   *   ここを憶測で書き戻すと、またセッションを飛ばす。 */
+  async function sendDirect() {
+    return {
+      ok: false,
+      reason: 'unsupported: 実送信の経路は無効（設計書§5-3のエンドポイントは現行のInstagram webに存在しない）。半自動をお使いください',
+    };
+  }
+
+
+  // DMページで下書きを流し込む（popup の「開く」で新しいタブが立ち上がったとき）。
+  // ★送信ボタンは押さない。押すのは人。
+  /* Instagram の DM 画面のメッセージ入力欄に本文を流し込む。**送信ボタンは押さない。**
+   *
+   * 入力欄は Lexical（Meta製のエディタ）で、値を代入しても React 側の状態が更新されない。
+   * どの入力方法が通るかは実物でしか分からないので、
+   *   ① execCommand('insertText')  ② beforeinput イベント  ③ paste イベント  ④ textarea なら value 代入
+   * を順に試し、**入力欄の中身が実際に変わったか**を毎回読み直して確認する。
+   * 全部だめなら、入力欄の作りを dm_composer_*.json に書き出して人が読めるようにする（憶測で直さないため）。 */
+  function composerCandidates() {
+    const sel = [
+      'div[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"]',
+      'div[role="textbox"]',
+      'textarea',
+      'p[data-lexical-text="true"]',
+    ];
+    const seen = new Set(); const out = [];
+    sel.forEach((q) => {
+      document.querySelectorAll(q).forEach((el) => {
+        if (seen.has(el)) return; seen.add(el); out.push(el);
+      });
+    });
+    return out;
+  }
+  function describe(el) {
+    const r = el.getBoundingClientRect();
+    const attrs = {};
+    for (const a of el.attributes || []) attrs[a.name] = String(a.value).slice(0, 120);
+    return {
+      tag: el.tagName, attrs,
+      textLen: (el.value != null ? String(el.value) : (el.textContent || '')).length,
+      visible: r.width > 0 && r.height > 0,
+      rect: { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top) },
+      parentTag: el.parentElement ? el.parentElement.tagName : null,
+      parentAttrs: el.parentElement ? [...(el.parentElement.attributes || [])].map((a) => a.name + '=' + String(a.value).slice(0, 60)) : [],
+    };
+  }
+  const readVal = (el) => (el.value != null ? String(el.value) : String(el.textContent || ''));
+
+  function tryInsert(el, text) {
+    const tried = [];
+    const before = readVal(el);
+    const changed = () => readVal(el) !== before && readVal(el).length > 0;
+    try { el.focus(); el.click(); } catch (e) { /* noop */ }
+
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      try {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
+          || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        setter.set.call(el, text);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        tried.push({ how: 'value-setter+input', ok: changed() });
+        if (changed()) return { ok: true, how: 'value-setter+input', tried };
+      } catch (e) { tried.push({ how: 'value-setter+input', ok: false, err: String(e && e.message) }); }
+    }
+
+    try {
+      const ok = document.execCommand('insertText', false, text);
+      tried.push({ how: 'execCommand', ok: ok && changed() });
+      if (changed()) return { ok: true, how: 'execCommand', tried };
+    } catch (e) { tried.push({ how: 'execCommand', ok: false, err: String(e && e.message) }); }
+
+    try {
+      el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: text, bubbles: true, cancelable: true, composed: true }));
+      el.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: text, bubbles: true, composed: true }));
+      tried.push({ how: 'beforeinput', ok: changed() });
+      if (changed()) return { ok: true, how: 'beforeinput', tried };
+    } catch (e) { tried.push({ how: 'beforeinput', ok: false, err: String(e && e.message) }); }
+
+    try {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true, composed: true }));
+      tried.push({ how: 'paste', ok: changed() });
+      if (changed()) return { ok: true, how: 'paste', tried };
+    } catch (e) { tried.push({ how: 'paste', ok: false, err: String(e && e.message) }); }
+
+    return { ok: false, how: null, tried };
+  }
+
+  async function fillComposer() {
+    if (!/^\/direct\//.test(location.pathname)) return;
+    const pend = (await stGet([DM_PENDING_KEY]))[DM_PENDING_KEY];
+    if (!pend || !pend.text) return;
+    await stSet({ [DM_PENDING_KEY]: null });
+
+    /* 入力欄が現れるまで待つ（スレッドの描画に時間がかかる） */
+    let box = null;
+    for (let i = 0; i < 40 && !box; i++) {
+      box = composerCandidates().find((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 80 && r.height > 0 && (el.isContentEditable || el.tagName === 'TEXTAREA');
+      }) || null;
+      if (!box) await sleep(500);
+    }
+
+    const report = {
+      at: new Date().toISOString(), handle: pend.handle, href: location.href,
+      found: !!box, candidates: composerCandidates().slice(0, 15).map(describe),
+    };
+    const pasteHint = pend.copied
+      ? '本文はコピー済みです。メッセージ欄をクリックして ⌘V で貼り付けてください。'
+      : '本文の自動コピーに失敗しました。ダッシュボードのパネルから本文をコピーしてください。';
+    if (!box) {
+      setBanner('メッセージ欄が見つかりませんでした。\n' + pasteHint, 'error');
+      report.result = 'not_found';
+    } else {
+      const r = tryInsert(box, pend.text);
+      report.result = r.ok ? 'ok' : 'insert_failed';
+      report.how = r.how; report.tried = r.tried; report.target = describe(box);
+      setBanner(r.ok
+        ? '下書きを入れました。内容を確認して、送信はご自身で押してください（拡張は送信しません）。'
+        : '自動入力は通りませんでした。\n' + pasteHint, r.ok ? 'done' : 'error');
+    }
+    clearBanner(15000);
+    try { chrome.runtime.sendMessage({ type: 'IGF_COMPOSER_REPORT', report }); } catch (e) { /* noop */ }
+  }
+  if (/^\/direct\//.test(location.pathname)) { fillComposer(); }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!msg || (msg.type !== 'IGF_COLLECT' && msg.type !== 'IGF_DISCOVER' && msg.type !== 'IGF_QUAL')) return;
+    // キルスイッチ（§6-5）。実行中の runDm とは別メッセージで受けて即座にフラグを立てる
+    if (msg && msg.type === 'IGF_DM_ABORT') {
+      window.__CASTNEXT_DM_ABORT = true;
+      setBanner('停止を受け付けました。送信中の1件を終えたら止まります。', 'error');
+      try { sendResponse({ ok: true }); } catch (e) { /* noop */ }
+      return;
+    }
+    // 疎通確認。**拡張をリロードすると、開いたままのタブの content script は古いまま**になり、
+    // メッセージが誰にも届かない（＝押しても無反応）。popup はこれで新旧を見分けて人に伝える。
+    if (msg && msg.type === 'IGF_PING') {
+      try {
+        sendResponse({
+          ok: true, features: ['IGF_COLLECT', 'IGF_DISCOVER', 'IGF_QUAL', 'IGF_DM', 'IGF_DM_ABORT'],
+          hasRunner: !!window.__CASTNEXT_DM, hasIGF: typeof window.IGF !== 'undefined', href: location.href,
+        });
+      } catch (e) { /* noop */ }
+      return;
+    }
+    if (!msg || (msg.type !== 'IGF_COLLECT' && msg.type !== 'IGF_DISCOVER'
+      && msg.type !== 'IGF_QUAL' && msg.type !== 'IGF_DM')) return;
     const onProgress = (p) => {
       try { chrome.runtime.sendMessage({ type: 'IGF_PROGRESS', p }); } catch (e) { /* popup閉 */ }
       if (p.phase === 'discover') setBanner(`発掘中 ${p.i}/${p.n}（候補 ${p.found}）`);
       else if (p.phase === 'discover_done') setBanner(`発掘完了：取得対象 ${p.picked}件。取得を開始…`);
       else if (p.phase === 'collect') setBanner(`取得中 ${p.i}/${p.n}｜@${p.handle}${p.err ? ' NG' : ''}`);
       else if (p.phase === 'qual') setBanner(`精査データ収集 ${p.i}/${p.n}｜@${p.handle}`);
+      else if (p.phase === 'dm_wait') setBanner(`DM送付 待機中 ${Math.round(p.waitMs / 1000)}秒（${p.i}/${p.n}）`);
+      else if (p.phase === 'dm') setBanner(`DM送付 ${p.i}/${p.n}｜@${p.handle}`);
     };
     setBanner('開始しています…');
     (async () => {
       try {
-        const result = msg.type === 'IGF_QUAL' ? await runQual(msg.payload || {}, onProgress)
+        const result = msg.type === 'IGF_DM' ? await runDm(msg.payload || {}, onProgress)
+          : msg.type === 'IGF_QUAL' ? await runQual(msg.payload || {}, onProgress)
           : msg.type === 'IGF_DISCOVER' ? await runDiscover(msg.payload || {}, onProgress)
           : await runCollect(msg.payload || {}, onProgress);
         if (result && result.ok) {
           const s = result.stats || {};
-          if (msg.type === 'IGF_QUAL') {
+          if (msg.type === 'IGF_DM') {
+            const head = s.dryRun ? 'ドライラン完了 ✓（送信していません）'
+              : (s.mode === 'semi' ? `下書き作成 ✓ ${s.draft}件（送信はご自身で）` : `DM送付 ✓ ${s.sent}件`);
+            setBanner(`${head}\n失敗 ${s.failed}${s.stopped ? '（' + s.stopped + 'で全停止）' : ''}`, s.stopped ? 'error' : 'done');
+            clearBanner(12000);
+            try { chrome.runtime.sendMessage({ type: 'IGF_DM_DONE', results: result.results, log: result.log, stats: result.stats, mode: s.mode, dryRun: s.dryRun }); } catch (e) { /* noop */ }
+          } else if (msg.type === 'IGF_QUAL') {
             setBanner(`精査データ完了 ✓ ${s.ok}名分（NG ${s.err}）${s.stopped ? '（中断）' : ''}\n→ 保存＆精査画面へ`, s.stopped ? 'error' : 'done');
             clearBanner(9000);
             try { chrome.runtime.sendMessage({ type: 'IGF_QUAL_DONE', files: result.qualFiles, firstHandle: result.firstHandle, stats: result.stats }); } catch (e) { /* noop */ }

@@ -1,7 +1,8 @@
 /* アプリのシェル(設計書§5-0)。サイドバー+ハッシュルータだけを持ち、画面は js/views/* に委ねる。 */
 import { ROUTES, currentRoute, onRoute, go } from "./router.js";
-import { state, boot, onChange, DEFAULT_PROJECT, createProject, TOOL_VER } from "./store.js";
+import { state, boot, onChange, markDirty, DEFAULT_PROJECT, createProject, TOOL_VER } from "./store.js";
 import { esc } from "./charts.js";
+import { todayISO } from "./pipeline/util.js";
 
 const VIEWS = {
   dash: () => import("./views/dash.js"),
@@ -66,11 +67,33 @@ function stub(path) {
     <div class="note">いまは P0〜P2(足場・パイプライン移植・分析結果画面)まで動いています。</div></div>`;
 }
 
+/* 拡張のDM送付結果を取り込む(設計書_DM自動一括送付 §5-5・§7)。
+ * background.js が localStorage に castnext_dm_result を書くので、描画のたびに1回だけ読んで消す。
+ * ドライランはステータスを進めない。適合コメント未記入で弾かれた分は黙らせず toast で言う。 */
+async function drainDmResult() {
+  let raw = null;
+  try { raw = localStorage.getItem("castnext_dm_result"); } catch (e) { return; }
+  if (!raw) return;
+  const { consumeDmResult } = await import("./pipeline/cdpDm.js");
+  const panel = await import("./views/dmpanel.js");
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch (e) { /* noop */ }
+  if (payload) panel.noteDmResult(payload);
+  const r = consumeDmResult(state.cands, todayISO());
+  if (!r) return;
+  if (r.applied.length) { markDirty(); toast(`DM送付を反映しました(${r.applied.length}件)`); }
+  if (r.drafts.length) toast(`下書きを作成しました(${r.drafts.length}件)。送信後に候補ボードで「DM送付」にしてください`);
+  r.blocked.forEach(b => toast(`@${b.handle}: ${b.reason}`, true));
+  if (r.failed.length) toast(`失敗 ${r.failed.length}件(監査ログ casting-next/dm/ を確認してください)`, true);
+  if (r.stopped) toast(`⚠ ${r.stopped} で全停止しました。原因を確認するまで再開しないでください`, true);
+}
+
 async function render() {
   const route = currentRoute();
   const view = document.getElementById("view");
   renderNav();
   if (!state.ready) { view.innerHTML = `<div class="stub">読み込み中…</div>`; return; }
+  await drainDmResult();
   /* 初回はウィザード(§9-1)。プロジェクトができるまで他の画面には行かせない */
   if (!state.project || (route.path === "setup")) {
     const mod = await import("./views/onboarding.js");

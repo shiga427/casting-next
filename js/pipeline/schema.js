@@ -21,8 +21,16 @@ export function newCand() {
     legacy_s2: null, scan: null,
     dmName: "", dmMention: "", captions: "", dmSentAt: "", remindAt: "",
     /* NEXT 追加(設計書§4-2):runTag / stanceHistory / qualReport */
-    runTag: "", stanceHistory: [], qualReport: null
+    runTag: "", stanceHistory: [], qualReport: null,
+    /* DM自動一括送付 §3。送付の事実は既存の status/dmSentAt に載せ、ここは監査・再送防止の参照用 */
+    dm: blankDm()
   };
+}
+
+/* 送付管理フィールド(DM自動一括送付 §3)。
+ * sentAt は ISO の厳密時刻。既存の dmSentAt(YYYY-MM-DD)とは別に残す */
+export function blankDm() {
+  return { lastText: "", sentAt: "", threadId: "", result: "", mode: "" };
 }
 
 export function blankCovMeta() { return { brand: "", revived: "", rate: "" }; }
@@ -75,6 +83,8 @@ export function migrate(c) {
   if (typeof m.runTag !== "string") m.runTag = "";
   if (!Array.isArray(m.stanceHistory)) m.stanceHistory = [];
   if (m.qualReport === undefined) m.qualReport = null;
+  /* DM送付管理(§3)。既存データには無いのでデフォルトを補う。既存値は消さない */
+  m.dm = Object.assign(blankDm(), (c && typeof c.dm === "object" && c.dm) || {});
   return m;
 }
 
