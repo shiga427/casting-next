@@ -8,6 +8,7 @@
 import * as Q from "./qualsignals.js";
 import { cpLen } from "./util.js";
 import { QUAL_MIN_SCORE } from "./conf.js";
+import { fitRate, fitOrder } from "./genrefit.js";
 
 const POST_HEAD = /^\[(\d+)\]\s*(\S+)?\s*like=(\S+)\s*comment=(\S+)/m;
 const CMT_HEAD = /^---\s*#(\d+)\s+user=@(\S+)\s+own_reply=(YES|no)/gm;
@@ -137,7 +138,15 @@ export function qualTargets(cands, opts) {
       && c.score.total != null && Number(c.score.total) >= minScore
       && !(c.qualReport && c.qualReport.done)
       && c.status !== "見送り")
-    .sort((a, b) => b.score.rate - a.score.rate)
+    /* 2026-08-07: 並びを「得点率」から「適合率(SBIS-1+ジャンル減点)」に変更。
+     * 精査枠(10名)を旅行・グルメ・ペットが食っていたため。閾値(minScore)は SBIS-1 の total のまま。 */
+    .sort((a, b) => {
+      const fa = fitRate(a), fb = fitRate(b);
+      const d = (fb == null ? -Infinity : fb) - (fa == null ? -Infinity : fa);
+      if (d !== 0) return d;
+      const g = fitOrder(b) - fitOrder(a);          /* 同点ならジャンルが近い方を上に */
+      return g !== 0 ? g : b.score.rate - a.score.rate;
+    })
     .slice(0, limit);
 }
 
