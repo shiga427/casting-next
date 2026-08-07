@@ -91,3 +91,20 @@ test("発掘タグはプリセットから作られ、生活文脈タグが先�
   /* 行動タグも落とさない */
   assert.ok(tags.some(t => t.tag === "#購入品紹介"));
 });
+
+test("懸賞・アフィリの巣になっているタグは既定OFF(タグ自体は消さない)", () => {
+  const tags = discoveryTags(preset);
+  const byTag = Object.fromEntries(tags.map(t => [t.tag, t]));
+  /* 2026-08-07 実測(本人環境405行)で美容ジャンル率が8〜23%だった4本 */
+  ["#当選報告", "#当選しました", "#モニター当選", "#購入品紹介"].forEach(t => {
+    assert.ok(byTag[t], "タグが消えている: " + t);
+    assert.equal(byTag[t].off, true, "既定OFFになっていない: " + t);
+  });
+  /* 美容率が高いタグは既定ON のまま */
+  ["#使い切りコスメ", "#スキンケア記録", "#夜のスキンケア", "#アラサー美容"].forEach(t => {
+    assert.equal(byTag[t].off, false, "既定ONのはずが外れている: " + t);
+  });
+  /* 判断材料の美容率が載っている */
+  assert.equal(byTag["#当選報告"].purity, 8);
+  assert.equal(byTag["#使い切りコスメ"].purity, 100);
+});

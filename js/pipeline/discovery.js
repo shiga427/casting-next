@@ -109,11 +109,28 @@ export function absorbRun(run, current) {
   };
 }
 
-/* 発掘の対象タグ(拡張へ渡す候補)。プロジェクトのプリセットから作る(ステムボーテ固定にしない) */
+/* 発掘の対象タグ(拡張へ渡す候補)。プロジェクトのプリセットから作る(ステムボーテ固定にしない)
+ *
+ * off: 既定でチェックを外すタグ(preset.search.e1_off_by_default)。
+ *      **タグを消すのではなく既定を外すだけ**なので、必要なら画面で選び直せる。
+ *      根拠は 2026-08-07 の実測(本人環境 405行)。#当選報告 8% / #モニター当選 8% /
+ *      #購入品紹介 21% / #当選しました 23% しか美容ジャンルが無く、
+ *      残りは懸賞垢・アフィリ垢・ペット/旅行/グルメで埋まる。
+ *      「犬が出てくる」の入口はここ。
+ * purity: タグ別の美容ジャンル率(%)。画面に出して選ぶときの判断材料にする。不明なら null。 */
 export function discoveryTags(preset) {
   const s = (preset && preset.search) || {};
+  const off = new Set((s.e1_off_by_default || []).map(normalizeTag).filter(Boolean));
+  const purityRaw = s.e1_purity || {};
+  const purity = {};
+  Object.keys(purityRaw).forEach(k => { const n = normalizeTag(k); if (n) purity[n] = purityRaw[k]; });
+  const add = (t, life, tags) => {
+    const n = normalizeTag(t);
+    if (!n || tags.some(x => x.tag === n)) return;
+    tags.push({ tag: n, life, off: off.has(n), purity: (n in purity) ? purity[n] : null });
+  };
   const tags = [];
-  (s.e1_life_tags || []).forEach(t => { const n = normalizeTag(t); if (n && !tags.includes(n)) tags.push({ tag: n, life: true }); });
-  (s.e1_tags || []).forEach(t => { const n = normalizeTag(t); if (n && !tags.some(x => x.tag === n)) tags.push({ tag: n, life: false }); });
+  (s.e1_life_tags || []).forEach(t => add(t, true, tags));
+  (s.e1_tags || []).forEach(t => add(t, false, tags));
   return tags;
 }

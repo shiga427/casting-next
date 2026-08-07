@@ -105,7 +105,7 @@ export function render() {
 /* ---- ① 発掘から始める(プール不要) ------------------------------------ */
 function discoverCard() {
   const tags = tagCache.length ? tagCache : [];
-  const chosen = (state.queue && state.queue.tags) || null;   // null = 全選択
+  const chosen = (state.queue && state.queue.tags) || null;   // null = プリセットの既定(off でないタグ)
   const target = (state.queue && state.queue.target) || 100;
   const done = doneSet();
   return `
@@ -116,8 +116,9 @@ function discoverCard() {
 
     ${tags.length ? `<div class="tagpick">
       ${tags.map(t => `<label class="tagbox"><input type="checkbox" class="tagchk" value="${esc(t.tag)}"
-        ${!chosen || chosen.includes(t.tag) ? "checked" : ""}> ${esc(t.tag)}
-        ${t.life ? `<span class="tag g">生活</span>` : ""}</label>`).join("")}
+        ${(chosen ? chosen.includes(t.tag) : !t.off) ? "checked" : ""}> ${esc(t.tag)}
+        ${t.life ? `<span class="tag g">生活</span>` : ""}
+        ${t.purity == null ? "" : `<span class="tag ${t.purity >= 80 ? "g" : t.purity >= 50 ? "res" : "red"}">美容${t.purity}%</span>`}</label>`).join("")}
     </div>
     <div class="toolrow" style="margin-top:6px">
       <button class="btn ghost sm" id="btnAll">全選択</button>
@@ -126,12 +127,15 @@ function discoverCard() {
     </div>
     <div class="sendbox">
       <b>拡張に渡す準備</b>
-      <div class="hint">選択中のタグ ${chosen ? chosen.length : tags.length}件 / 目標 ${target}件 /
+      <div class="hint">選択中のタグ ${chosen ? chosen.length : tags.filter(t => !t.off).length}件 / 目標 ${target}件 /
         取得済み ${done.size}件は拡張へ渡す対象から除外されます</div>
       <div class="hint">→ <b>拡張ポップアップの「①発掘して収集」</b>を押してください（このページは開いたままに）</div>
       <div class="hint sent" id="dSent">${esc(lastSentAt("castnext_cdp_discover"))}</div>
     </div>
-    <div class="note">生活文脈タグは行動タグの2倍の帯内率・2.5倍の有効率が出ています(run#6実測)。迷ったら生活文脈タグから。</div>`
+    <div class="note">生活文脈タグは行動タグの2倍の帯内率・2.5倍の有効率が出ています(run#6実測)。迷ったら生活文脈タグから。<br>
+      「美容○%」はそのタグから拾えた人のうち美容ジャンルだった割合(本人環境405行の実測・2026-08-07)。
+      <b>当選系と#購入品紹介は美容が8〜23%しかなく、残りは懸賞垢・アフィリ垢・ペット/旅行/グルメです。
+      犬アカウントが出てくる入口はここなので既定でOFFにしています。</b></div>`
     : `<div class="hint">タグを読み込んでいます…</div>`}
   </div>`;
 }
